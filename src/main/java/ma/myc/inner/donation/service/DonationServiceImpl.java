@@ -5,6 +5,7 @@ import ma.myc.inner.donation.domain.bo.DonationBO;
 import ma.myc.inner.donation.domain.bo.DonorBO;
 import ma.myc.inner.donation.domain.dto.CreateDonationRequest;
 import ma.myc.inner.donation.domain.dto.DonationResponse;
+import ma.myc.inner.donation.domain.dto.DonorSnapshot;
 import ma.myc.inner.donation.domain.dto.UpdateDonationRequest;
 import ma.myc.inner.donation.events.DonationEventMapper;
 import ma.myc.inner.donation.mapper.DonationMapper;
@@ -63,13 +64,16 @@ public class DonationServiceImpl implements DonationService {
         log.info("Create donation donorId={} category={}",
                 request.donor().donorId(), request.category());
 
+        // Le donateur doit exister (404 sinon), verifie AVANT toute ecriture : ni don, ni evenement orphelin
+        DonorBO donor = findDonor(request.donor().donorId());
+
         DonationBO donation = donationMapper.toBo(request);
         DonationBO saved = donationRepository.save(donation);
 
-
+        // Instantane du donateur pris en base (source de verite), pas dans la requete du client
         var envelope = donationEventMapper.toDonationCreatedEnvelope(
                 saved,
-                request.donor(),
+                toSnapshot(donor),
                 producerName
         );
 
@@ -124,6 +128,10 @@ public class DonationServiceImpl implements DonationService {
     private DonorBO findDonor(UUID donorId) {
         return donorRepository.findById(donorId)
                 .orElseThrow(() -> new NotFoundException("Donor not found: " + donorId));
+    }
+
+    private static DonorSnapshot toSnapshot(DonorBO donor) {
+        return new DonorSnapshot(donor.getId(), donor.getDateOfBirth(), donor.getCountry());
     }
 
 }

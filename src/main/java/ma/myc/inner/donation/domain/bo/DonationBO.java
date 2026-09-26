@@ -3,7 +3,6 @@ package ma.myc.inner.donation.domain.bo;
 
 import jakarta.persistence.*;
 import lombok.Setter;
-import org.hibernate.annotations.GenericGenerator;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -19,8 +18,9 @@ import java.util.UUID;
 )
 public class DonationBO {
 
+    // Identifiant attribue par l'application (DonationMapper.newId), comme DonorBO : pas de @GeneratedValue.
+    // Avec les deux, save() fait un merge qu'Hibernate 7 rejette (ObjectOptimisticLockingFailureException).
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
     @Column(name = "donation_id",  columnDefinition = "BINARY(16)",nullable = false, updatable = false)
     private UUID id;
 

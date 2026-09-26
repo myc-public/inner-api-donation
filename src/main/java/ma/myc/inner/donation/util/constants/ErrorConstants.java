@@ -21,14 +21,14 @@ public class ErrorConstants {
 	public static final String URI_BUSINESS_EXCEPTION = BASE_URI + "/business-exception";
 	public static final String URI_NOT_FOUND = BASE_URI + "/not-found";
 	public static final String URI_CONFLICT = BASE_URI + "/conflict";
+	public static final String URI_ARGUMENT_TYPE_MISMATCH = BASE_URI + "/argument-type-mismatch";
+	public static final String URI_UNSUPPORTED_MEDIA_TYPE = BASE_URI + "/unsupported-media-type";
+	public static final String URI_NOT_ACCEPTABLE = BASE_URI + "/not-acceptable";
 
 	/**
 	 * MESSAGES
 	 **/
 	public static final String ERR_TECHNICAL = "error.technical.message";
 	public static final String ERR_INTERNAL_SERVER = "error.internal.message";
-
-	public static final String ERR_CODE_VILLE_NOTBLANK= "{error.geo.ville.code.not-blank}";
-	public static final String ERR_CODE_PAYS_NOTEMPTY = "{error.geo.ville.codePays.not-empty}";
 
 }
