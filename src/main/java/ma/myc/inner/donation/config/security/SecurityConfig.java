@@ -43,7 +43,9 @@ public class SecurityConfig {
 
 		@Order(ORDER)
 		@Bean
-		@ConditionalOnProperty(prefix = "myc.security", name = "enabled", havingValue = "false", matchIfMissing = true)
+		// Securite active par defaut : sans myc.security.enabled, seule la chaine securisee est creee
+		// (avant : les deux chaines l'etaient, et le demarrage echouait sur deux chaines "any request")
+		@ConditionalOnProperty(prefix = "myc.security", name = "enabled", havingValue = "false")
 		SecurityFilterChain disabledSecurityFilterChain(HttpSecurity http) throws Exception {
 			http
 					.authorizeHttpRequests(t -> t.anyRequest().permitAll());
@@ -67,7 +69,7 @@ public class SecurityConfig {
 			http.sessionManagement(management -> management.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 					.authorizeHttpRequests(authRequests -> authRequests
 							.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-							.requestMatchers("/v1/**").hasAuthority(GlobalConstants.SCOPE)
+							.requestMatchers(GlobalConstants.API_V1_PATTERN).hasAuthority(GlobalConstants.SCOPE)
 							.requestMatchers(securityProps.getWhitelistPath().toArray(String[]::new)).permitAll()
 							.anyRequest().authenticated())
 					.oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults())

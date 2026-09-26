@@ -39,9 +39,7 @@ public class DonorServiceImpl implements DonorService {
 
         if (donorRepository.existsByEmail(request.email())) {
             log.warn("Donor already exists (email already registered)");
-            throw new DonorAlreadyExistsException(
-                    "Donor already exists with email: " + request.email()
-            );
+            throw new DonorAlreadyExistsException();
         }
         DonorBO donor = donorMapper.toBo(request);
         donor.setCreatedAt(Instant.now());
@@ -69,7 +67,8 @@ public class DonorServiceImpl implements DonorService {
 
         if (request.email() != null && !request.email().equalsIgnoreCase(donor.getEmail())
                 && donorRepository.existsByEmail(request.email())) {
-            throw new IllegalArgumentException("Email already used");
+            log.warn("Donor email update rejected (email already registered) donorId={}", donorId);
+            throw new DonorAlreadyExistsException();
         }
 
         donorMapper.patch(donor, request);

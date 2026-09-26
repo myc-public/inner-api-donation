@@ -13,6 +13,11 @@ public final class GlobalConstants {
 	public static final String SCOPE = "SCOPE_" + SCOPE_INNER;
 
 	/**
+	 * API PATHS
+	 **/
+	public static final String API_V1_PATTERN = "/api/v1/**";
+
+	/**
 	 * OpenApi
 	 **/
 	public static final String INFO_API_TITLE = "MYC Donation API";
@@ -21,7 +26,6 @@ public final class GlobalConstants {
 	public static final String CONTACT_NAME = "myc Morocco";
 	public static final String CONTACT_EMAIL = "helpdesk@myc.ma";
 	public static final String CONTACT_WEBSITE = "https://myc.ma";
-	public static final String DONATION_APIS_TAG = "donation-apis";
 
 	/**
 	 * REQUEST HEADERS

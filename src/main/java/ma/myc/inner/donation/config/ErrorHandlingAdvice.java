@@ -3,19 +3,26 @@ package ma.myc.inner.donation.config;
 import ma.myc.inner.donation.exception.DonorAlreadyExistsException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.util.StringUtils;
+import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.util.UrlPathHelper;
+
+import java.util.List;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -201,14 +208,16 @@ public class ErrorHandlingAdvice {
 	@ResponseStatus(HttpStatus.BAD_REQUEST)
 	ApiError onMethodArgumentNotValidException(
 			MethodArgumentNotValidException e, final HttpServletRequest request) {
-		String message = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-		logger.error(LOG_REQUEST, message, request.getMethod(), request.getRequestURI());
+		// Le message Spring contient les valeurs rejetees (donnees personnelles) : on ne journalise que les champs
+		var fields = e.getBindingResult().getFieldErrors().stream().map(FieldError::getField).toList();
+		logger.warn(LOG_REQUEST, "Request validation failed on fields " + fields, request.getMethod(),
+				request.getRequestURI());
 		String traceId = requestHandler.getCorrelationId();
 
 		return ApiError.builder()
 				.type(ErrorConstants.URI_METHOD_ARGUMENT_NOT_VALID)
 				.title("Method Argument Not Valid")
-				.detail(e.getMessage())
+				.detail("Request validation failed")
 				.status(HttpStatus.BAD_REQUEST.value())
 				.instance(urlPathHelper.getPathWithinApplication(request))
 				.traceId(traceId)
@@ -225,14 +234,15 @@ public class ErrorHandlingAdvice {
 	@ResponseStatus(HttpStatus.BAD_REQUEST)
 	ApiError onHttpMessageNotReadableException(HttpMessageNotReadableException e,
 			final HttpServletRequest request) {
-		String message = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-		logger.error(LOG_REQUEST, message, request.getMethod(), request.getRequestURI());
+		// Le message Jackson peut reprendre le contenu du corps (donnees personnelles) : seul le type d'erreur est journalise
+		String cause = e.getCause() != null ? e.getCause().getClass().getSimpleName() : e.getClass().getSimpleName();
+		logger.warn(LOG_REQUEST, "Unreadable request body (" + cause + ")", request.getMethod(), request.getRequestURI());
 		String traceId = requestHandler.getCorrelationId();
 
 		return ApiError.builder()
 				.type(ErrorConstants.URI_HTTP_MESSAGE_NOT_READABLE)
-				.title("Field validation")
-				.detail(e.getMessage())
+				.title("Malformed request body")
+				.detail("The request body is missing or is not valid JSON for this operation")
 				.status(HttpStatus.BAD_REQUEST.value())
 				.instance(urlPathHelper.getPathWithinApplication(request))
 				.traceId(traceId)
@@ -264,6 +274,76 @@ public class ErrorHandlingAdvice {
 		return message;
 	}
 	// Add your ExceptionHandler here ...
+	@ExceptionHandler(MethodArgumentTypeMismatchException.class)
+	@ResponseStatus(HttpStatus.BAD_REQUEST)
+	ApiError onMethodArgumentTypeMismatchException(MethodArgumentTypeMismatchException e,
+			final HttpServletRequest request) {
+		// Sans ce handler, un identifiant mal forme (ex. UUID invalide) tombait dans RuntimeException -> 500
+		String expectedType = e.getRequiredType() != null ? e.getRequiredType().getSimpleName() : "value";
+		logger.warn(LOG_REQUEST, "Invalid value for parameter '" + e.getName() + "'", request.getMethod(),
+				request.getRequestURI());
+		return ApiError.builder()
+				.type(ErrorConstants.URI_ARGUMENT_TYPE_MISMATCH)
+				.title("Invalid parameter")
+				.detail("Parameter '" + e.getName() + "' has an invalid format")
+				.status(HttpStatus.BAD_REQUEST.value())
+				.instance(urlPathHelper.getPathWithinApplication(request))
+				.traceId(requestHandler.getCorrelationId())
+				.errors(List.of(ApiErrorItem.builder()
+						.target(e.getName())
+						.message("must be a valid " + expectedType)
+						.build()))
+				.build();
+	}
+
+	@ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+	@ResponseStatus(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+	ApiError onHttpMediaTypeNotSupportedException(HttpMediaTypeNotSupportedException e,
+			final HttpServletRequest request) {
+		logger.warn(LOG_REQUEST, "Unsupported content type " + e.getContentType(), request.getMethod(),
+				request.getRequestURI());
+		return ApiError.builder()
+				.type(ErrorConstants.URI_UNSUPPORTED_MEDIA_TYPE)
+				.title("Unsupported Media Type")
+				.detail("Supported content types: " + e.getSupportedMediaTypes())
+				.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE.value())
+				.instance(urlPathHelper.getPathWithinApplication(request))
+				.traceId(requestHandler.getCorrelationId())
+				.build();
+	}
+
+	@ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
+	@ResponseStatus(HttpStatus.NOT_ACCEPTABLE)
+	ApiError onHttpMediaTypeNotAcceptableException(HttpMediaTypeNotAcceptableException e,
+			final HttpServletRequest request) {
+		// Si le client n'accepte pas JSON, ce corps ne peut pas etre ecrit : Spring renvoie alors un 406 sans corps
+		logger.warn(LOG_REQUEST, "Not acceptable", request.getMethod(), request.getRequestURI());
+		return ApiError.builder()
+				.type(ErrorConstants.URI_NOT_ACCEPTABLE)
+				.title("Not Acceptable")
+				.detail("Supported response types: " + e.getSupportedMediaTypes())
+				.status(HttpStatus.NOT_ACCEPTABLE.value())
+				.instance(urlPathHelper.getPathWithinApplication(request))
+				.traceId(requestHandler.getCorrelationId())
+				.build();
+	}
+
+	@ExceptionHandler(DataIntegrityViolationException.class)
+	@ResponseStatus(HttpStatus.CONFLICT)
+	ApiError onDataIntegrityViolationException(DataIntegrityViolationException e, final HttpServletRequest request) {
+		// Le message SQL reprend les valeurs en conflit (ex. l'email) : jamais expose ni journalise
+		logger.warn(LOG_REQUEST, "Data integrity violation (" + e.getMostSpecificCause().getClass().getSimpleName() + ")",
+				request.getMethod(), request.getRequestURI());
+		return ApiError.builder()
+				.type(ErrorConstants.URI_CONFLICT)
+				.title("Conflict")
+				.detail("The request conflicts with existing data")
+				.status(HttpStatus.CONFLICT.value())
+				.instance(urlPathHelper.getPathWithinApplication(request))
+				.traceId(requestHandler.getCorrelationId())
+				.build();
+	}
+
 	@ExceptionHandler(DonorAlreadyExistsException.class)
 	@ResponseStatus(HttpStatus.CONFLICT)
 	ApiError onDonorAlreadyExistsException(DonorAlreadyExistsException e, final HttpServletRequest request) {

@@ -84,7 +84,8 @@ class DonorServiceImplTest {
 
         assertThatThrownBy(() -> donorService.create(request))
                 .isInstanceOf(DonorAlreadyExistsException.class)
-                .hasMessageContaining(EMAIL);
+                .hasMessage(DonorAlreadyExistsException.MESSAGE)
+                .message().doesNotContain(EMAIL);
 
         verify(donorRepository, never()).save(any());
     }
@@ -175,7 +176,7 @@ class DonorServiceImplTest {
     }
 
     @Test
-    @DisplayName("update: throws IllegalArgumentException when new email is already taken by another donor")
+    @DisplayName("update: throws DonorAlreadyExistsException when new email is already taken by another donor")
     void update_emailAlreadyTaken_throwsException() {
         DonorBO donor = buildDonorBO();
         var request = new UpdateDonorRequest(null, null, "taken@example.com", null, null);
@@ -184,8 +185,8 @@ class DonorServiceImplTest {
         when(donorRepository.existsByEmail("taken@example.com")).thenReturn(true);
 
         assertThatThrownBy(() -> donorService.update(DONOR_ID, request))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Email already used");
+                .isInstanceOf(DonorAlreadyExistsException.class)
+                .message().doesNotContain("taken@example.com");
 
         verify(donorRepository, never()).save(any());
     }
