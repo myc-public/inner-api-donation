@@ -163,6 +163,9 @@ management:
       # Histogramme de latence HTTP : p95 / p99 calculables (SLO)
       percentiles-histogram:
         http.server.requests: true
+      # Borne exacte du SLO de latence (95 % < 300 ms) : sans elle, les buckets par defaut sautent de 268 a 358 ms
+      slo:
+        http.server.requests: 300ms
   # --- Observabilite OpenTelemetry (OTLP) : desactivee par defaut (local, tests), activee par l'overlay ---
   tracing:
     sampling:
