@@ -1,0 +1,294 @@
+{
+  "info": {
+    "name": "donation-api - observabilite (phase 4)",
+    "description": "Scenarios S1 (nominal) et S2 (erreurs 4xx) du plan de test observabilite (jenkins-on-openshift-with-terraform/docs/dashboard-grafana-as-code-v1.md). Collection Runner : un dossier a la fois, avec le data file indique dans son nom.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "S1 - Parcours nominal (data : observabilite-s1-nominal.data.json)",
+      "item": [
+        {
+          "name": "1. Creer un donateur",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"201 donateur cree\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"donorId\", pm.response.json().donorId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lastName\": \"{{lastName}}\",\n  \"firstName\": \"{{firstName}}\",\n  \"email\": \"{{emailPrefix}}.{{$timestamp}}{{$randomInt}}@test.local\",\n  \"dateOfBirth\": \"{{dateOfBirth}}\",\n  \"country\": \"{{country}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "2. Creer un don",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"201 don cree\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"donationId\", pm.response.json().donationId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"{{category}}\",\n  \"type\": {{type}},\n  \"amount\": {{amount}},\n  \"donor\": { \"donorId\": \"{{donorId}}\" }\n}"
+            }
+          }
+        },
+        {
+          "name": "3. Lire le donateur",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/donors/{{donorId}}"
+          }
+        },
+        {
+          "name": "4. Lire le don",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/donations/{{donationId}}"
+          }
+        },
+        {
+          "name": "5. Dons du donateur",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/donations/by-donor/{{donorId}}"
+          }
+        },
+        {
+          "name": "6. Liste des donateurs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/donors?page=0&size=20"
+          }
+        }
+      ]
+    },
+    {
+      "name": "S2 - Erreurs 4xx (data : observabilite-s2-erreurs.data.json)",
+      "item": [
+        {
+          "name": "POST donor",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Execute seulement la requete designee par la colonne \"request\" du data file",
+                  "if (pm.iterationData.get(\"request\") !== \"POST donor\") { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = String(pm.iterationData.get(\"expectedStatus\")).split(\"|\").map(Number);",
+                  "pm.test(pm.iterationData.get(\"case\") + \" -> \" + expected.join(\" ou \"), () => pm.expect(expected).to.include(pm.response.code));",
+                  "// traceId de la reponse d erreur : a coller dans Grafana Explore > Tempo",
+                  "try { const t = pm.response.json().traceId; if (t) console.log(pm.iterationData.get(\"case\"), \"traceId\", t); } catch (e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "{{contentType}}"
+              },
+              {
+                "key": "Accept",
+                "value": "{{accept}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors",
+            "body": {
+              "mode": "raw",
+              "raw": "{{body}}"
+            }
+          }
+        },
+        {
+          "name": "POST donation",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Execute seulement la requete designee par la colonne \"request\" du data file",
+                  "if (pm.iterationData.get(\"request\") !== \"POST donation\") { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = String(pm.iterationData.get(\"expectedStatus\")).split(\"|\").map(Number);",
+                  "pm.test(pm.iterationData.get(\"case\") + \" -> \" + expected.join(\" ou \"), () => pm.expect(expected).to.include(pm.response.code));",
+                  "// traceId de la reponse d erreur : a coller dans Grafana Explore > Tempo",
+                  "try { const t = pm.response.json().traceId; if (t) console.log(pm.iterationData.get(\"case\"), \"traceId\", t); } catch (e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "{{contentType}}"
+              },
+              {
+                "key": "Accept",
+                "value": "{{accept}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations",
+            "body": {
+              "mode": "raw",
+              "raw": "{{body}}"
+            }
+          }
+        },
+        {
+          "name": "GET",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Execute seulement la requete designee par la colonne \"request\" du data file",
+                  "if (pm.iterationData.get(\"request\") !== \"GET\") { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = String(pm.iterationData.get(\"expectedStatus\")).split(\"|\").map(Number);",
+                  "pm.test(pm.iterationData.get(\"case\") + \" -> \" + expected.join(\" ou \"), () => pm.expect(expected).to.include(pm.response.code));",
+                  "// traceId de la reponse d erreur : a coller dans Grafana Explore > Tempo",
+                  "try { const t = pm.response.json().traceId; if (t) console.log(pm.iterationData.get(\"case\"), \"traceId\", t); } catch (e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "{{accept}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{path}}"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://donation-api-gregorie769-dev.apps.rm3.7wse.p1.openshiftapps.com"
+    },
+    {
+      "key": "donorId",
+      "value": ""
+    },
+    {
+      "key": "donationId",
+      "value": ""
+    }
+  ]
+}

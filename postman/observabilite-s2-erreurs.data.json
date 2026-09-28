@@ -1,0 +1,137 @@
+[
+  {
+    "case": "Donateur sans email",
+    "request": "POST donor",
+    "path": "",
+    "body": "{\"lastName\": \"Sans\", \"firstName\": \"Email\", \"dateOfBirth\": \"1990-01-01\", \"country\": \"MA\"}",
+    "contentType": "application/json",
+    "accept": "application/json",
+    "expectedStatus": "400"
+  },
+  {
+    "case": "Donateur avec email invalide",
+    "request": "POST donor",
+    "path": "",
+    "body": "{\"lastName\": \"Erreur\", \"firstName\": \"Test\", \"email\": \"pas-un-email\", \"dateOfBirth\": \"1990-01-01\", \"country\": \"MA\"}",
+    "contentType": "application/json",
+    "accept": "application/json",
+    "expectedStatus": "400"
+  },
+  {
+    "case": "Donateur avec nom vide",
+    "request": "POST donor",
+    "path": "",
+    "body": "{\"lastName\": \"\", \"firstName\": \"Test\", \"email\": \"erreur.test@test.local\", \"dateOfBirth\": \"1990-01-01\", \"country\": \"MA\"}",
+    "contentType": "application/json",
+    "accept": "application/json",
+    "expectedStatus": "400"
+  },
+  {
+    "case": "JSON mal forme",
+    "request": "POST donor",
+    "path": "",
+    "body": "{\"lastName\": \"Casse\", \"firstName\": ",
+    "contentType": "application/json",
+    "accept": "application/json",
+    "expectedStatus": "400"
+  },
+  {
+    "case": "Content-Type non supporte",
+    "request": "POST donor",
+    "path": "",
+    "body": "lastName=Texte",
+    "contentType": "text/plain",
+    "accept": "application/json",
+    "expectedStatus": "415"
+  },
+  {
+    "case": "Doublon email - 1er passage (cree)",
+    "request": "POST donor",
+    "path": "",
+    "body": "{\"lastName\": \"Erreur\", \"firstName\": \"Test\", \"email\": \"doublon.observabilite@test.local\", \"dateOfBirth\": \"1990-01-01\", \"country\": \"MA\"}",
+    "contentType": "application/json",
+    "accept": "application/json",
+    "expectedStatus": "201|409"
+  },
+  {
+    "case": "Doublon email - 2e passage (refuse)",
+    "request": "POST donor",
+    "path": "",
+    "body": "{\"lastName\": \"Erreur\", \"firstName\": \"Test\", \"email\": \"doublon.observabilite@test.local\", \"dateOfBirth\": \"1990-01-01\", \"country\": \"MA\"}",
+    "contentType": "application/json",
+    "accept": "application/json",
+    "expectedStatus": "409"
+  },
+  {
+    "case": "Don avec montant nul",
+    "request": "POST donation",
+    "path": "",
+    "body": "{\"category\": \"FOOD\", \"type\": true, \"amount\": 0, \"donor\": {\"donorId\": \"00000000-0000-0000-0000-000000000000\"}}",
+    "contentType": "application/json",
+    "accept": "application/json",
+    "expectedStatus": "400"
+  },
+  {
+    "case": "Don avec categorie inconnue",
+    "request": "POST donation",
+    "path": "",
+    "body": "{\"category\": \"LUXE\", \"type\": true, \"amount\": 50, \"donor\": {\"donorId\": \"00000000-0000-0000-0000-000000000000\"}}",
+    "contentType": "application/json",
+    "accept": "application/json",
+    "expectedStatus": "400"
+  },
+  {
+    "case": "Don sans donateur",
+    "request": "POST donation",
+    "path": "",
+    "body": "{\"category\": \"FOOD\", \"type\": true, \"amount\": 50}",
+    "contentType": "application/json",
+    "accept": "application/json",
+    "expectedStatus": "400"
+  },
+  {
+    "case": "Don pour un donateur inconnu",
+    "request": "POST donation",
+    "path": "",
+    "body": "{\"category\": \"FOOD\", \"type\": true, \"amount\": 50, \"donor\": {\"donorId\": \"00000000-0000-0000-0000-000000000000\"}}",
+    "contentType": "application/json",
+    "accept": "application/json",
+    "expectedStatus": "404"
+  },
+  {
+    "case": "Donateur inexistant",
+    "request": "GET",
+    "path": "/api/v1/donors/00000000-0000-0000-0000-000000000000",
+    "body": "",
+    "contentType": "application/json",
+    "accept": "application/json",
+    "expectedStatus": "404"
+  },
+  {
+    "case": "UUID invalide dans l URL",
+    "request": "GET",
+    "path": "/api/v1/donors/abc",
+    "body": "",
+    "contentType": "application/json",
+    "accept": "application/json",
+    "expectedStatus": "400"
+  },
+  {
+    "case": "Don inexistant",
+    "request": "GET",
+    "path": "/api/v1/donations/00000000-0000-0000-0000-000000000000",
+    "body": "",
+    "contentType": "application/json",
+    "accept": "application/json",
+    "expectedStatus": "404"
+  },
+  {
+    "case": "Format de reponse non supporte",
+    "request": "GET",
+    "path": "/api/v1/donors",
+    "body": "",
+    "contentType": "application/json",
+    "accept": "application/xml",
+    "expectedStatus": "406"
+  }
+]
