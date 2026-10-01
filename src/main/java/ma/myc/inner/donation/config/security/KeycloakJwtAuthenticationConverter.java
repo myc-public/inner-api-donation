@@ -17,11 +17,11 @@ import org.springframework.stereotype.Component;
 import ma.myc.inner.donation.util.constants.GlobalConstants;
 
 /**
- * Token Keycloak -> droits Spring :
+ * Token Keycloak -> droits Spring (modele C, ADR 01/10) :
  * <ul>
  * <li>{@code scope} -> {@code SCOPE_donation:read}, {@code SCOPE_donation:write} ;</li>
- * <li>{@code resource_access.donation-api.roles} -> {@code ROLE_admin}, {@code ROLE_agent}, {@code ROLE_donor}
- * (seuls les roles du client de l'API, ceux des autres clients sont ignores) ;</li>
+ * <li>{@code resource_access.donation-api.roles} -> permissions telles quelles ({@code donor:delete}, {@code donation:list}...) :
+ * seules les permissions de l'API, celles des autres clients et les roles metier ({@code realm_access}) sont ignores ;</li>
  * <li>nom de l'utilisateur = {@code sub} (identifiant stable, sans donnee personnelle, base de l'ABAC).</li>
  * </ul>
  */
@@ -30,7 +30,6 @@ public class KeycloakJwtAuthenticationConverter implements Converter<Jwt, Abstra
 
 	private static final String RESOURCE_ACCESS = "resource_access";
 	private static final String ROLES = "roles";
-	private static final String ROLE_PREFIX = "ROLE_";
 
 	private final JwtGrantedAuthoritiesConverter scopesConverter = new JwtGrantedAuthoritiesConverter();
 
@@ -38,12 +37,12 @@ public class KeycloakJwtAuthenticationConverter implements Converter<Jwt, Abstra
 	public AbstractAuthenticationToken convert(Jwt jwt) {
 		Collection<GrantedAuthority> authorities = Stream.concat(
 						scopesConverter.convert(jwt).stream(),
-						clientRoles(jwt).stream())
+						permissions(jwt).stream())
 				.toList();
 		return new JwtAuthenticationToken(jwt, authorities, jwt.getSubject());
 	}
 
-	private static List<GrantedAuthority> clientRoles(Jwt jwt) {
+	private static List<GrantedAuthority> permissions(Jwt jwt) {
 		Map<String, Object> resourceAccess = jwt.getClaimAsMap(RESOURCE_ACCESS);
 		if (resourceAccess == null
 				|| !(resourceAccess.get(GlobalConstants.RESOURCE_CLIENT_ID) instanceof Map<?, ?> client)
@@ -52,7 +51,7 @@ public class KeycloakJwtAuthenticationConverter implements Converter<Jwt, Abstra
 		}
 		return roles.stream()
 				.map(String::valueOf)
-				.map(role -> (GrantedAuthority) new SimpleGrantedAuthority(ROLE_PREFIX + role))
+				.map(permission -> (GrantedAuthority) new SimpleGrantedAuthority(permission))
 				.toList();
 	}
 }

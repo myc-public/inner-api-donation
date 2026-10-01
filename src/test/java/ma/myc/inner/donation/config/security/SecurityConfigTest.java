@@ -39,6 +39,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Chaine de securite reelle (myc.security.enabled=true) : GET exige donation:read,
  * POST / PATCH / DELETE exigent donation:write (l'audience est verifiee par le decodeur, cf. JwtValidationTest).
+ * Les permissions de chaque operation sont testees par PermissionsTest : ici elles sont toutes accordees.
  */
 @WebMvcTest(controllers = {DonorController.class, DonationController.class})
 @Import({SecurityConfig.class, SecurityAuthEntryPoint.class, SecurityAccessDeniedHandler.class,
@@ -52,6 +53,17 @@ class SecurityConfigTest {
 
     private static final SimpleGrantedAuthority READ = new SimpleGrantedAuthority(GlobalConstants.SCOPE_READ);
     private static final SimpleGrantedAuthority WRITE = new SimpleGrantedAuthority(GlobalConstants.SCOPE_WRITE);
+    // Toutes les permissions (K3) : ce test isole le controle des scopes (K2)
+    private static final SimpleGrantedAuthority[] ALL_PERMISSIONS = java.util.stream.Stream.of(
+                    "donor:create", "donor:read", "donor:list", "donor:update", "donor:delete",
+                    "donation:create", "donation:read", "donation:list", "donation:update", "donation:delete")
+            .map(SimpleGrantedAuthority::new).toArray(SimpleGrantedAuthority[]::new);
+
+    private static SimpleGrantedAuthority[] with(SimpleGrantedAuthority scope) {
+        SimpleGrantedAuthority[] authorities = java.util.Arrays.copyOf(ALL_PERMISSIONS, ALL_PERMISSIONS.length + 1);
+        authorities[ALL_PERMISSIONS.length] = scope;
+        return authorities;
+    }
 
     @Autowired
     private MockMvc mockMvc;
@@ -86,7 +98,7 @@ class SecurityConfigTest {
         when(donorService.get(DONOR_ID)).thenReturn(donor());
 
         mockMvc.perform(get("/api/v1/donors/{id}", DONOR_ID).accept(MediaType.APPLICATION_JSON)
-                        .with(jwt().authorities(READ)))
+                        .with(jwt().authorities(with(READ))))
                 .andExpect(status().isOk());
     }
 
@@ -96,7 +108,7 @@ class SecurityConfigTest {
         when(donationService.list()).thenReturn(List.of());
 
         mockMvc.perform(get("/api/v1/donations").accept(MediaType.APPLICATION_JSON)
-                        .with(jwt().authorities(READ)))
+                        .with(jwt().authorities(with(READ))))
                 .andExpect(status().isOk());
     }
 
@@ -104,7 +116,7 @@ class SecurityConfigTest {
     @DisplayName("GET with donation:write only returns 403 (write does not imply read)")
     void get_withWriteScopeOnly_returns403() throws Exception {
         mockMvc.perform(get("/api/v1/donors/{id}", DONOR_ID).accept(MediaType.APPLICATION_JSON)
-                        .with(jwt().authorities(WRITE)))
+                        .with(jwt().authorities(with(WRITE))))
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(donorService);
@@ -114,17 +126,17 @@ class SecurityConfigTest {
     @DisplayName("GET with the former inner:donation scope returns 403")
     void get_withFormerScope_returns403() throws Exception {
         mockMvc.perform(get("/api/v1/donations").accept(MediaType.APPLICATION_JSON)
-                        .with(jwt().authorities(new SimpleGrantedAuthority("SCOPE_inner:donation"))))
+                        .with(jwt().authorities(with(new SimpleGrantedAuthority("SCOPE_inner:donation")))))
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(donationService);
     }
 
     @Test
-    @DisplayName("GET with a role but no scope returns 403 (audience alone is not enough)")
-    void get_withRoleButNoScope_returns403() throws Exception {
+    @DisplayName("GET with permissions but no scope returns 403 (audience alone is not enough)")
+    void get_withPermissionsButNoScope_returns403() throws Exception {
         mockMvc.perform(get("/api/v1/donors/{id}", DONOR_ID).accept(MediaType.APPLICATION_JSON)
-                        .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_admin"))))
+                        .with(jwt().authorities(ALL_PERMISSIONS)))
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(donorService);
@@ -134,7 +146,7 @@ class SecurityConfigTest {
     @DisplayName("POST with donation:read only returns 403")
     void post_withReadScope_returns403() throws Exception {
         mockMvc.perform(post("/api/v1/donors").contentType(MediaType.APPLICATION_JSON).content(DONOR_JSON)
-                        .with(jwt().authorities(READ)))
+                        .with(jwt().authorities(with(READ))))
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(donorService);
@@ -146,14 +158,14 @@ class SecurityConfigTest {
         when(donorService.create(any(CreateDonorRequest.class))).thenReturn(donor());
 
         mockMvc.perform(post("/api/v1/donors").contentType(MediaType.APPLICATION_JSON).content(DONOR_JSON)
-                        .with(jwt().authorities(WRITE)))
+                        .with(jwt().authorities(with(WRITE))))
                 .andExpect(status().isCreated());
     }
 
     @Test
     @DisplayName("DELETE with donation:read only returns 403")
     void delete_withReadScope_returns403() throws Exception {
-        mockMvc.perform(delete("/api/v1/donors/{id}", DONOR_ID).with(jwt().authorities(READ)))
+        mockMvc.perform(delete("/api/v1/donors/{id}", DONOR_ID).with(jwt().authorities(with(READ))))
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(donorService);
@@ -162,7 +174,7 @@ class SecurityConfigTest {
     @Test
     @DisplayName("DELETE with donation:write returns 204")
     void delete_withWriteScope_returns204() throws Exception {
-        mockMvc.perform(delete("/api/v1/donors/{id}", DONOR_ID).with(jwt().authorities(WRITE)))
+        mockMvc.perform(delete("/api/v1/donors/{id}", DONOR_ID).with(jwt().authorities(with(WRITE))))
                 .andExpect(status().isNoContent());
     }
 }
