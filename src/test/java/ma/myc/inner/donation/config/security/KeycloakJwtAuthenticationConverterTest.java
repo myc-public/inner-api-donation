@@ -33,26 +33,27 @@ class KeycloakJwtAuthenticationConverterTest {
     }
 
     @Test
-    @DisplayName("scopes and donation-api client roles become SCOPE_ and ROLE_ authorities")
-    void convert_scopesAndApiRoles() {
+    @DisplayName("scopes become SCOPE_ authorities and donation-api client roles become permissions as is")
+    void convert_scopesAndApiPermissions() {
         AbstractAuthenticationToken token = converter.convert(jwt(Map.of(
                 "scope", "donation:read donation:write",
-                "resource_access", Map.of("donation-api", Map.of("roles", List.of("admin", "agent"))))));
+                "resource_access", Map.of("donation-api", Map.of("roles", List.of("donor:read", "donor:delete"))))));
 
         assertThat(authorities(token)).containsExactlyInAnyOrder(
-                "SCOPE_donation:read", "SCOPE_donation:write", "ROLE_admin", "ROLE_agent");
+                "SCOPE_donation:read", "SCOPE_donation:write", "donor:read", "donor:delete");
     }
 
     @Test
-    @DisplayName("roles of other clients are ignored")
-    void convert_otherClientRoles_ignored() {
+    @DisplayName("permissions of other clients and business (realm) roles are ignored")
+    void convert_otherClientsAndRealmRoles_ignored() {
         AbstractAuthenticationToken token = converter.convert(jwt(Map.of(
                 "scope", "donation:read",
+                "realm_access", Map.of("roles", List.of("donation-admin")),
                 "resource_access", Map.of(
-                        "donation-api", Map.of("roles", List.of("donor")),
-                        "other-api", Map.of("roles", List.of("admin"))))));
+                        "donation-api", Map.of("roles", List.of("donor:read")),
+                        "other-api", Map.of("roles", List.of("donor:delete"))))));
 
-        assertThat(authorities(token)).containsExactlyInAnyOrder("SCOPE_donation:read", "ROLE_donor");
+        assertThat(authorities(token)).containsExactlyInAnyOrder("SCOPE_donation:read", "donor:read");
     }
 
     @Test
@@ -64,11 +65,11 @@ class KeycloakJwtAuthenticationConverterTest {
     }
 
     @Test
-    @DisplayName("malformed resource_access (roles not a list) grants no role")
-    void convert_malformedRoles_noRole() {
+    @DisplayName("malformed resource_access (roles not a list) grants no permission")
+    void convert_malformedRoles_noPermission() {
         AbstractAuthenticationToken token = converter.convert(jwt(Map.of(
                 "scope", "donation:read",
-                "resource_access", Map.of("donation-api", Map.of("roles", "admin")))));
+                "resource_access", Map.of("donation-api", Map.of("roles", "donor:delete")))));
 
         assertThat(authorities(token)).containsExactly("SCOPE_donation:read");
     }
