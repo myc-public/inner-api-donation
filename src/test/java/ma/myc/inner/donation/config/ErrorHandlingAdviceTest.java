@@ -55,7 +55,7 @@ class ErrorHandlingAdviceTest {
     private DonorService donorService;
 
     @Test
-    @WithMockUser(authorities = {GlobalConstants.SCOPE})
+    @WithMockUser(authorities = {GlobalConstants.SCOPE_READ})
     @DisplayName("GET /donors/{id} returns 404 when donor does not exist")
     void get_unknownDonor_returns404() throws Exception {
         UUID unknownId = UUID.randomUUID();

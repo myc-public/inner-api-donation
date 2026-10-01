@@ -10,9 +10,8 @@ myc:
   request:
     compression:
       enabled: false
+  # Securite metier active par defaut (tokens Keycloak) ; CORS ferme (pas d'allowed-origin-pattern)
   security:
-    enabled: false
-    allowed-origin-pattern: "*"
     csp:
       enabled: false
       directives: default-src 'none'
@@ -79,12 +78,15 @@ spring:
     locations: classpath:db/migration
 
 
-  #CHANGE_IT security conf
+  # Resource server : tokens Keycloak (realm myc). Defauts = Keycloak local (gitops-platform/local/keycloak) ;
+  # sur OpenShift, l'overlay fournit OIDC_ISSUER_URI (URL publique) et OIDC_JWK_SET_URI (URL interne, backchannel).
   security:
     oauth2:
       resourceserver:
         jwt:
-          jwk-set-uri: ${AUTH_ADFS_URL_KEYS:https://srv-dcdev.myc-dev.local/adfs/discovery/keys}
+          issuer-uri: ${OIDC_ISSUER_URI:http://localhost:8180/realms/myc}
+          jwk-set-uri: ${OIDC_JWK_SET_URI:http://localhost:8180/realms/myc/protocol/openid-connect/certs}
+          audiences: donation-api
 
 
 ### SPANS SQL (datasource-micrometer) ###

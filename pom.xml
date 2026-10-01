@@ -93,20 +93,13 @@
 			<optional>true</optional>
 		</dependency>
 		
-		<!-- Spring security -->
+		<!-- Spring security : resource server OAuth2 (tokens Keycloak).
+		     Boot 4 : l'auto-configuration du resource server (spring.security.oauth2.resourceserver.jwt.*)
+		     est dans un module dedie, apporte par ce starter (il inclut spring-boot-starter-security,
+		     spring-security-oauth2-resource-server et -jose). -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-security</artifactId>
-		</dependency>
-
-		<dependency>
-			<groupId>org.springframework.security</groupId>
-			<artifactId>spring-security-oauth2-resource-server</artifactId>
-		</dependency>
-
-		<dependency>
-			<groupId>org.springframework.security</groupId>
-			<artifactId>spring-security-oauth2-jose</artifactId>
+			<artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
 		</dependency>
 
 		<!-- JPA -->
