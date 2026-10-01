@@ -7,10 +7,15 @@ public final class GlobalConstants {
 	}
 
 	/**
-	 * SCOPE
+	 * SECURITE (Keycloak, realm myc)
 	 **/
-	public static final String SCOPE_INNER = "inner:donation";
-	public static final String SCOPE = "SCOPE_" + SCOPE_INNER;
+	// Client Keycloak de l'API : audience attendue et porteur des roles (resource_access.donation-api.roles)
+	public static final String RESOURCE_CLIENT_ID = "donation-api";
+	// Scopes OAuth2 demandes par les clients (le token doit porter l'audience ET le scope)
+	public static final String SCOPE_DONATION_READ = "donation:read";
+	public static final String SCOPE_DONATION_WRITE = "donation:write";
+	public static final String SCOPE_READ = "SCOPE_" + SCOPE_DONATION_READ;
+	public static final String SCOPE_WRITE = "SCOPE_" + SCOPE_DONATION_WRITE;
 
 	/**
 	 * API PATHS
