@@ -1569,6 +1569,347 @@
           }
         }
       ]
+    },
+    {
+      "name": "05 - Console de compte Keycloak",
+      "item": [
+        {
+          "name": "Compte agent.casa (myc-internal) 1/4 - page de login + PKCE",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// PKCE : code_verifier aleatoire, code_challenge = BASE64URL(SHA256(verifier))",
+                  "const cryptoJs = require(\"crypto-js\");",
+                  "const alphabet = \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\";",
+                  "let verifier = \"\";",
+                  "for (let i = 0; i < 64; i++) verifier += alphabet.charAt(Math.floor(Math.random() * alphabet.length));",
+                  "const challenge = cryptoJs.SHA256(verifier).toString(cryptoJs.enc.Base64).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\");",
+                  "pm.collectionVariables.set(\"pkceVerifier\", verifier);",
+                  "pm.collectionVariables.set(\"pkceChallenge\", challenge);",
+                  "pm.collectionVariables.set(\"keycloakUrlEncoded\", encodeURIComponent(pm.environment.get(\"keycloakUrl\")));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "// Keycloak pose ses cookies en Secure/SameSite=None : on les renvoie nous-memes a l'etape suivante",
+                  "const cookies = pm.response.headers.all().filter(h => h.key.toLowerCase() === \"set-cookie\").map(h => h.value.split(\";\")[0]).join(\"; \");",
+                  "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
+                  "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
+                  "pm.collectionVariables.set(\"kcCookies\", cookies);",
+                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-internal/protocol/openid-connect/auth?client_id=account-console&response_type=code&scope=openid&redirect_uri={{keycloakUrlEncoded}}%2Frealms%2Fmyc-internal%2Faccount%2F&code_challenge={{pkceChallenge}}&code_challenge_method=S256"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Compte agent.casa (myc-internal) 2/4 - identifiants",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"redirection vers le client (302)\", () => pm.response.to.have.status(302));",
+                  "const location = pm.response.headers.get(\"Location\") || \"\";",
+                  "const code = (location.match(/[?&]code=([^&]+)/) || [])[1];",
+                  "pm.test(\"code d'autorisation recu\", () => pm.expect(code).to.be.a(\"string\"));",
+                  "pm.collectionVariables.set(\"authCode\", code);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "{{kcCookies}}"
+              }
+            ],
+            "url": "{{loginAction}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "username",
+                  "value": "agent.casa"
+                },
+                {
+                  "key": "password",
+                  "value": "{{testUsersPassword}}"
+                },
+                {
+                  "key": "credentialId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false,
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Compte agent.casa (myc-internal) 3/4 - echange du code (client public)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"accountToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-internal/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code"
+                },
+                {
+                  "key": "client_id",
+                  "value": "account-console"
+                },
+                {
+                  "key": "code",
+                  "value": "{{authCode}}"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "{{keycloakUrl}}/realms/myc-internal/account/"
+                },
+                {
+                  "key": "code_verifier",
+                  "value": "{{pkceVerifier}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "M7 - agent.casa (myc-internal) 4/4 - API de compte : 200 et party_id invisible",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"party_id invisible pour l'utilisateur\", () => pm.expect(pm.response.json().userProfileMetadata.attributes.map(a => a.name)).to.not.include(\"party_id\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accountToken}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{keycloakUrl}}/realms/myc-internal/account/?userProfileMetadata=true"
+          }
+        },
+        {
+          "name": "Compte donor.a@example.test (myc-customers) 1/4 - page de login + PKCE",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// PKCE : code_verifier aleatoire, code_challenge = BASE64URL(SHA256(verifier))",
+                  "const cryptoJs = require(\"crypto-js\");",
+                  "const alphabet = \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\";",
+                  "let verifier = \"\";",
+                  "for (let i = 0; i < 64; i++) verifier += alphabet.charAt(Math.floor(Math.random() * alphabet.length));",
+                  "const challenge = cryptoJs.SHA256(verifier).toString(cryptoJs.enc.Base64).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\");",
+                  "pm.collectionVariables.set(\"pkceVerifier\", verifier);",
+                  "pm.collectionVariables.set(\"pkceChallenge\", challenge);",
+                  "pm.collectionVariables.set(\"keycloakUrlEncoded\", encodeURIComponent(pm.environment.get(\"keycloakUrl\")));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "// Keycloak pose ses cookies en Secure/SameSite=None : on les renvoie nous-memes a l'etape suivante",
+                  "const cookies = pm.response.headers.all().filter(h => h.key.toLowerCase() === \"set-cookie\").map(h => h.value.split(\";\")[0]).join(\"; \");",
+                  "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
+                  "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
+                  "pm.collectionVariables.set(\"kcCookies\", cookies);",
+                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-customers/protocol/openid-connect/auth?client_id=account-console&response_type=code&scope=openid&redirect_uri={{keycloakUrlEncoded}}%2Frealms%2Fmyc-customers%2Faccount%2F&code_challenge={{pkceChallenge}}&code_challenge_method=S256"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Compte donor.a@example.test (myc-customers) 2/4 - identifiants",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"redirection vers le client (302)\", () => pm.response.to.have.status(302));",
+                  "const location = pm.response.headers.get(\"Location\") || \"\";",
+                  "const code = (location.match(/[?&]code=([^&]+)/) || [])[1];",
+                  "pm.test(\"code d'autorisation recu\", () => pm.expect(code).to.be.a(\"string\"));",
+                  "pm.collectionVariables.set(\"authCode\", code);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "{{kcCookies}}"
+              }
+            ],
+            "url": "{{loginAction}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "username",
+                  "value": "donor.a@example.test"
+                },
+                {
+                  "key": "password",
+                  "value": "{{testUsersPassword}}"
+                },
+                {
+                  "key": "credentialId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false,
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Compte donor.a@example.test (myc-customers) 3/4 - echange du code (client public)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"accountToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-customers/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code"
+                },
+                {
+                  "key": "client_id",
+                  "value": "account-console"
+                },
+                {
+                  "key": "code",
+                  "value": "{{authCode}}"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "{{keycloakUrl}}/realms/myc-customers/account/"
+                },
+                {
+                  "key": "code_verifier",
+                  "value": "{{pkceVerifier}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "M7 - donor.a@example.test (myc-customers) 4/4 - API de compte : 200 et party_id invisible",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"party_id invisible pour l'utilisateur\", () => pm.expect(pm.response.json().userProfileMetadata.attributes.map(a => a.name)).to.not.include(\"party_id\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accountToken}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{keycloakUrl}}/realms/myc-customers/account/?userProfileMetadata=true"
+          }
+        }
+      ]
     }
   ],
   "variable": [
@@ -1602,6 +1943,14 @@
     },
     {
       "key": "benefToken",
+      "value": ""
+    },
+    {
+      "key": "accountToken",
+      "value": ""
+    },
+    {
+      "key": "keycloakUrlEncoded",
       "value": ""
     },
     {
