@@ -2,7 +2,6 @@ package ma.myc.inner.donation.config.security;
 
 import java.util.Collection;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Stream;
 
 import org.springframework.core.convert.converter.Converter;
@@ -14,22 +13,22 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.stereotype.Component;
 
-import ma.myc.inner.donation.util.constants.GlobalConstants;
-
 /**
- * Token Keycloak -> droits Spring (modele C, ADR 01/10) :
+ * Token -> droits Spring, selon le CONTRAT DE CLAIMS du SI (ADR 02/10, DI3), independant de l'IdP :
  * <ul>
  * <li>{@code scope} -> {@code SCOPE_donation:read}, {@code SCOPE_donation:write} ;</li>
- * <li>{@code resource_access.donation-api.roles} -> permissions telles quelles ({@code donor:delete}, {@code donation:list}...) :
- * seules les permissions de l'API, celles des autres clients et les roles metier ({@code realm_access}) sont ignores ;</li>
- * <li>nom de l'utilisateur = {@code sub} (identifiant stable, sans donnee personnelle, base de l'ABAC).</li>
+ * <li>{@code permissions} (liste a plat, pour cette API) -> permissions telles quelles ({@code donor:delete}...) ;</li>
+ * <li>nom = {@code party_id} (identifiant metier de la personne) ; a defaut (compte de service), {@code azp}.</li>
  * </ul>
+ * Aucune structure propre a un IdP (resource_access, realm_access, sub) n'est lue.
  */
 @Component
-public class KeycloakJwtAuthenticationConverter implements Converter<Jwt, AbstractAuthenticationToken> {
+public class ClaimsJwtAuthenticationConverter implements Converter<Jwt, AbstractAuthenticationToken> {
 
-	private static final String RESOURCE_ACCESS = "resource_access";
-	private static final String ROLES = "roles";
+	public static final String CLAIM_PERMISSIONS = "permissions";
+	public static final String CLAIM_PARTY_ID = "party_id";
+	public static final String CLAIM_ACTOR_TYPE = "actor_type";
+	private static final String CLAIM_AUTHORIZED_PARTY = "azp";
 
 	private final JwtGrantedAuthoritiesConverter scopesConverter = new JwtGrantedAuthoritiesConverter();
 
@@ -39,19 +38,21 @@ public class KeycloakJwtAuthenticationConverter implements Converter<Jwt, Abstra
 						scopesConverter.convert(jwt).stream(),
 						permissions(jwt).stream())
 				.toList();
-		return new JwtAuthenticationToken(jwt, authorities, jwt.getSubject());
+		return new JwtAuthenticationToken(jwt, authorities, principalName(jwt));
 	}
 
 	private static List<GrantedAuthority> permissions(Jwt jwt) {
-		Map<String, Object> resourceAccess = jwt.getClaimAsMap(RESOURCE_ACCESS);
-		if (resourceAccess == null
-				|| !(resourceAccess.get(GlobalConstants.RESOURCE_CLIENT_ID) instanceof Map<?, ?> client)
-				|| !(client.get(ROLES) instanceof Collection<?> roles)) {
+		if (!(jwt.getClaims().get(CLAIM_PERMISSIONS) instanceof Collection<?> permissions)) {
 			return List.of();
 		}
-		return roles.stream()
+		return permissions.stream()
 				.map(String::valueOf)
 				.map(permission -> (GrantedAuthority) new SimpleGrantedAuthority(permission))
 				.toList();
+	}
+
+	private static String principalName(Jwt jwt) {
+		String partyId = jwt.getClaimAsString(CLAIM_PARTY_ID);
+		return partyId != null ? partyId : jwt.getClaimAsString(CLAIM_AUTHORIZED_PARTY);
 	}
 }

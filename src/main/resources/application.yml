@@ -12,6 +12,15 @@ myc:
       enabled: false
   # Securite metier active par defaut (tokens Keycloak) ; CORS ferme (pas d'allowed-origin-pattern)
   security:
+    # Emetteurs de confiance (ADR 02/10, DI4) : un par realm. Defauts = Keycloak local (gitops-platform/local/keycloak).
+    # Sur OpenShift, l'overlay fournit les URL publiques (iss) et internes (JWKS, backchannel). Changer d'IdP = changer ce bloc.
+    oidc:
+      audience: donation-api
+      issuers:
+        - issuer-uri: ${OIDC_INTERNAL_ISSUER_URI:http://localhost:8180/realms/myc-internal}
+          jwk-set-uri: ${OIDC_INTERNAL_JWK_SET_URI:http://localhost:8180/realms/myc-internal/protocol/openid-connect/certs}
+        - issuer-uri: ${OIDC_CUSTOMERS_ISSUER_URI:http://localhost:8180/realms/myc-customers}
+          jwk-set-uri: ${OIDC_CUSTOMERS_JWK_SET_URI:http://localhost:8180/realms/myc-customers/protocol/openid-connect/certs}
     csp:
       enabled: false
       directives: default-src 'none'
@@ -77,16 +86,6 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
-
-  # Resource server : tokens Keycloak (realm myc). Defauts = Keycloak local (gitops-platform/local/keycloak) ;
-  # sur OpenShift, l'overlay fournit OIDC_ISSUER_URI (URL publique) et OIDC_JWK_SET_URI (URL interne, backchannel).
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          issuer-uri: ${OIDC_ISSUER_URI:http://localhost:8180/realms/myc}
-          jwk-set-uri: ${OIDC_JWK_SET_URI:http://localhost:8180/realms/myc/protocol/openid-connect/certs}
-          audiences: donation-api
 
 
 ### SPANS SQL (datasource-micrometer) ###
