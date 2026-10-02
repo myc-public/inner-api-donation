@@ -5,6 +5,7 @@ import ma.myc.inner.donation.api.DonorController;
 import ma.myc.inner.donation.config.ErrorHandlingAdvice;
 import ma.myc.inner.donation.config.TestConfig;
 import ma.myc.inner.donation.config.properties.MycSecurityProps;
+import ma.myc.inner.donation.config.properties.OidcProps;
 import ma.myc.inner.donation.domain.dto.CreateDonorRequest;
 import ma.myc.inner.donation.domain.dto.DonorResponse;
 import ma.myc.inner.donation.service.DonationService;
@@ -17,7 +18,6 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -43,8 +43,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @WebMvcTest(controllers = {DonorController.class, DonationController.class})
 @Import({SecurityConfig.class, SecurityAuthEntryPoint.class, SecurityAccessDeniedHandler.class,
-        KeycloakJwtAuthenticationConverter.class, MycSecurityProps.class, ErrorHandlingAdvice.class, TestConfig.class})
-@TestPropertySource(properties = "myc.security.enabled=true")
+        ClaimsJwtAuthenticationConverter.class, OidcIssuersConfig.class, OidcProps.class, MycSecurityProps.class, ErrorHandlingAdvice.class, TestConfig.class})
+@TestPropertySource(properties = {"myc.security.enabled=true", "myc.security.oidc.audience=donation-api",
+        "myc.security.oidc.issuers[0].issuer-uri=http://localhost:8180/realms/myc-internal",
+        "myc.security.oidc.issuers[0].jwk-set-uri=http://localhost:8180/realms/myc-internal/protocol/openid-connect/certs"})
 class SecurityConfigTest {
 
     private static final UUID DONOR_ID = UUID.randomUUID();
@@ -74,9 +76,6 @@ class SecurityConfigTest {
     @MockitoBean
     private DonationService donationService;
 
-    // Le jeton est fourni par jwt() : le decodeur n'est jamais appele, mais le resource server en exige un
-    @MockitoBean
-    private JwtDecoder jwtDecoder;
 
     private static DonorResponse donor() {
         return new DonorResponse(DONOR_ID, "Molin", "Jean", "jean.molin@example.com", LocalDate.of(1999, 9, 19), "MA");
