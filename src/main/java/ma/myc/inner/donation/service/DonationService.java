@@ -10,6 +10,9 @@ public interface DonationService {
     DonationResponse get(UUID donationId);
     List<DonationResponse> list();
     List<DonationResponse> listByDonor(UUID donorId);
+    // Libre-service du donateur (K4c) : identite deja verifiee (party_id du token)
+    DonationResponse createForDonor(UUID donorId, CreateMyDonationRequest request);
+    DonationResponse getForDonor(UUID donationId, UUID donorId);
     DonationResponse update(UUID donationId, UpdateDonationRequest request);
     void delete(UUID donationId);
 }

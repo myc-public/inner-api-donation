@@ -24,4 +24,11 @@ public final class Permissions {
 	public static final String DONATION_LIST = "hasAuthority('donation:list')";
 	public static final String DONATION_UPDATE = "hasAuthority('donation:update')";
 	public static final String DONATION_DELETE = "hasAuthority('donation:delete')";
+
+	// Permissions "proprietaire" (K4c) : endpoints /me du donateur, identite = party_id du token (CurrentParty)
+	public static final String DONOR_CREATE_OWN = "hasAuthority('donor:create:own')";
+	public static final String DONOR_READ_OWN = "hasAuthority('donor:read:own')";
+	public static final String DONATION_CREATE_OWN = "hasAuthority('donation:create:own')";
+	public static final String DONATION_READ_OWN = "hasAuthority('donation:read:own')";
+	public static final String DONATION_LIST_OWN = "hasAuthority('donation:list:own')";
 }

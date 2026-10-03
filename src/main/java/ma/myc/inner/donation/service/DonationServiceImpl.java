@@ -4,11 +4,13 @@ import jakarta.transaction.Transactional;
 import ma.myc.inner.donation.domain.bo.DonationBO;
 import ma.myc.inner.donation.domain.bo.DonorBO;
 import ma.myc.inner.donation.domain.dto.CreateDonationRequest;
+import ma.myc.inner.donation.domain.dto.CreateMyDonationRequest;
 import ma.myc.inner.donation.domain.dto.DonationResponse;
 import ma.myc.inner.donation.domain.dto.DonorSnapshot;
 import ma.myc.inner.donation.domain.dto.UpdateDonationRequest;
 import ma.myc.inner.donation.events.DonationEventMapper;
 import ma.myc.inner.donation.mapper.DonationMapper;
+import ma.myc.inner.donation.exception.DonorProfileRequiredException;
 import ma.myc.inner.donation.exception.NotFoundException;
 import ma.myc.inner.donation.outbox.OutboxEventRepository;
 import ma.myc.inner.donation.outbox.OutboxFactory;
@@ -104,6 +106,25 @@ public class DonationServiceImpl implements DonationService {
     public List<DonationResponse> listByDonor(UUID donorId) {
         log.debug("Listing donations by donorId={}", donorId);
         return donationRepository.findByDonorId(donorId).stream().map(donationMapper::toResponse).toList();
+    }
+
+    @Override
+    public DonationResponse createForDonor(UUID donorId, CreateMyDonationRequest request) {
+        // Le profil donateur doit exister (409 sinon, DC4) : il est cree par l'onboarding (POST /donors/me)
+        if (!donorRepository.existsById(donorId)) {
+            throw new DonorProfileRequiredException();
+        }
+        return create(new CreateDonationRequest(request.category(), request.type(), request.amount(),
+                new DonorSnapshot(donorId, null, null)));
+    }
+
+    @Override
+    public DonationResponse getForDonor(UUID donationId, UUID donorId) {
+        log.debug("Fetching own donation donationId={}", donationId);
+        // Don inexistant ou d'un autre donateur : meme 404 (DC3), aucune information sur l'existence
+        return donationRepository.findByIdAndDonorId(donationId, donorId)
+                .map(donationMapper::toResponse)
+                .orElseThrow(() -> new NotFoundException("Donation not found: " + donationId));
     }
 
     @Override

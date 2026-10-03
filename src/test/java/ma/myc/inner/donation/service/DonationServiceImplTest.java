@@ -4,6 +4,7 @@ import ma.myc.inner.donation.domain.bo.DonationBO;
 import ma.myc.inner.donation.domain.bo.DonationCategory;
 import ma.myc.inner.donation.domain.bo.DonorBO;
 import ma.myc.inner.donation.domain.dto.CreateDonationRequest;
+import ma.myc.inner.donation.domain.dto.CreateMyDonationRequest;
 import ma.myc.inner.donation.domain.dto.DonationResponse;
 import ma.myc.inner.donation.domain.dto.DonorSnapshot;
 import ma.myc.inner.donation.domain.dto.UpdateDonationRequest;
@@ -15,6 +16,7 @@ import ma.myc.inner.donation.outbox.OutboxEventBO;
 import ma.myc.inner.donation.outbox.OutboxEventRepository;
 import ma.myc.inner.donation.outbox.OutboxFactory;
 import ma.myc.inner.donation.repository.DonationRepository;
+import ma.myc.inner.donation.exception.DonorProfileRequiredException;
 import ma.myc.inner.donation.exception.NotFoundException;
 import ma.myc.inner.donation.repository.DonorRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -272,5 +274,31 @@ class DonationServiceImplTest {
 
         assertThatThrownBy(() -> donationService.delete(DONATION_ID))
                 .isInstanceOf(NotFoundException.class);
+    }
+
+    // ─── libre-service du donateur (K4c) ──────────────────────────────────────
+
+    @Test
+    @DisplayName("createForDonor: without a donor profile, 409 and nothing is written")
+    void createForDonor_noProfile_conflict() {
+        UUID partyId = UUID.randomUUID();
+        when(donorRepository.existsById(partyId)).thenReturn(false);
+
+        assertThatThrownBy(() -> donationService.createForDonor(partyId,
+                new CreateMyDonationRequest(DonationCategory.FOOD, true, new BigDecimal("50"))))
+                .isInstanceOf(DonorProfileRequiredException.class);
+        verifyNoInteractions(donationRepository, outboxEventRepository);
+    }
+
+    @Test
+    @DisplayName("getForDonor: a donation of another donor (or unknown) is not found")
+    void getForDonor_notOwned_notFound() {
+        UUID donationId = UUID.randomUUID();
+        UUID partyId = UUID.randomUUID();
+        when(donationRepository.findByIdAndDonorId(donationId, partyId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> donationService.getForDonor(donationId, partyId))
+                .isInstanceOf(NotFoundException.class);
+        verify(donationRepository, never()).findById(any());
     }
 }
