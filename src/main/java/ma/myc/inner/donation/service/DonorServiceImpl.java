@@ -4,6 +4,7 @@ import jakarta.transaction.Transactional;
 import ma.myc.inner.donation.domain.bo.DonorBO;
 import ma.myc.inner.donation.domain.dto.CreateDonorRequest;
 import ma.myc.inner.donation.domain.dto.DonorResponse;
+import ma.myc.inner.donation.domain.dto.RegisterDonorRequest;
 import ma.myc.inner.donation.domain.dto.UpdateDonorRequest;
 import ma.myc.inner.donation.exception.DonorAlreadyExistsException;
 import ma.myc.inner.donation.exception.NotFoundException;
@@ -46,6 +47,23 @@ public class DonorServiceImpl implements DonorService {
         DonorBO saved = donorRepository.save(donor);
 
         return donorMapper.toResponse(saved);
+    }
+
+    @Override
+    public DonorResponse registerSelf(UUID donorId, String email, RegisterDonorRequest request) {
+        log.info("Registering own donor profile");
+        // Une personne = un profil donateur : l'identifiant est celui de la personne (party_id), jamais genere ici
+        if (donorRepository.existsById(donorId)) {
+            log.warn("Donor profile already exists for this person");
+            throw new DonorAlreadyExistsException(DonorAlreadyExistsException.PROFILE_MESSAGE);
+        }
+        if (donorRepository.existsByEmail(email)) {
+            log.warn("Donor already exists (email already registered)");
+            throw new DonorAlreadyExistsException();
+        }
+        DonorBO donor = new DonorBO(donorId, request.lastName(), request.firstName(), email,
+                request.dateOfBirth(), request.country(), Instant.now());
+        return donorMapper.toResponse(donorRepository.save(donor));
     }
 
     @Override

@@ -800,6 +800,152 @@
           }
         },
         {
+          "name": "Login donor.b@example.test (myc-customers) 1/3 - page de login + PKCE",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// PKCE : code_verifier aleatoire, code_challenge = BASE64URL(SHA256(verifier))",
+                  "const cryptoJs = require(\"crypto-js\");",
+                  "const alphabet = \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\";",
+                  "let verifier = \"\";",
+                  "for (let i = 0; i < 64; i++) verifier += alphabet.charAt(Math.floor(Math.random() * alphabet.length));",
+                  "const challenge = cryptoJs.SHA256(verifier).toString(cryptoJs.enc.Base64).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\");",
+                  "pm.collectionVariables.set(\"pkceVerifier\", verifier);",
+                  "pm.collectionVariables.set(\"pkceChallenge\", challenge);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "// Keycloak pose ses cookies en Secure/SameSite=None : on les renvoie nous-memes a l'etape suivante",
+                  "const cookies = pm.response.headers.all().filter(h => h.key.toLowerCase() === \"set-cookie\").map(h => h.value.split(\";\")[0]).join(\"; \");",
+                  "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
+                  "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
+                  "pm.collectionVariables.set(\"kcCookies\", cookies);",
+                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-customers/protocol/openid-connect/auth?client_id=donation-tests&response_type=code&scope=openid%20donation%3Aread%20donation%3Awrite&redirect_uri=https%3A%2F%2Foauth.pstmn.io%2Fv1%2Fcallback&code_challenge={{pkceChallenge}}&code_challenge_method=S256&state=local"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Login donor.b@example.test (myc-customers) 2/3 - identifiants",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"redirection vers le client (302)\", () => pm.response.to.have.status(302));",
+                  "const location = pm.response.headers.get(\"Location\") || \"\";",
+                  "const code = (location.match(/[?&]code=([^&]+)/) || [])[1];",
+                  "pm.test(\"code d'autorisation recu\", () => pm.expect(code).to.be.a(\"string\"));",
+                  "pm.collectionVariables.set(\"authCode\", code);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "{{kcCookies}}"
+              }
+            ],
+            "url": "{{loginAction}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "username",
+                  "value": "donor.b@example.test"
+                },
+                {
+                  "key": "password",
+                  "value": "{{testUsersPassword}}"
+                },
+                {
+                  "key": "credentialId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false,
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Login donor.b@example.test (myc-customers) 3/3 - echange du code (PKCE)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const claims = (t) => JSON.parse(Buffer.from(t.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\"), \"base64\").toString());",
+                  "const perms = (t) => (claims(t).permissions || []).slice().sort();",
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json().access_token;",
+                  "pm.collectionVariables.set(\"donorBToken\", t);",
+                  "pm.test(\"R3d - donor.b : 5 permissions proprietaire (:own)\", () => pm.expect(perms(t)).to.have.lengthOf(5));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-customers/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code"
+                },
+                {
+                  "key": "client_id",
+                  "value": "donation-tests"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{donationTestsClientSecret}}"
+                },
+                {
+                  "key": "code",
+                  "value": "{{authCode}}"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://oauth.pstmn.io/v1/callback"
+                },
+                {
+                  "key": "code_verifier",
+                  "value": "{{pkceVerifier}}"
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Login benef.a@example.test (myc-customers) 1/3 - page de login + PKCE",
           "event": [
             {
@@ -1910,6 +2056,358 @@
           }
         }
       ]
+    },
+    {
+      "name": "06 - ABAC donateur (K4c)",
+      "item": [
+        {
+          "name": "C1 - donor.a POST /donors/me -> 201 (409 si relance)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"profil cree (201) ou deja existant (409)\", () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"lastName\":\"A\",\"firstName\":\"Donor\",\"dateOfBirth\":\"1990-01-01\",\"country\":\"MA\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "C2 - donor.a GET /donors/me -> donorId = party_id, email du token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"donorId = party_id du token\", () => pm.expect(pm.response.json().donorId).to.eql(\"8f098e43-e3c0-4143-aac7-dc0a9a7bffbd\"));",
+                  "pm.test(\"email = email verifie du compte\", () => pm.expect(pm.response.json().email).to.eql(\"donor.a@example.test\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors/me"
+          }
+        },
+        {
+          "name": "C3 - donor.a POST /donations/me -> 201",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"myDonationId\", pm.response.json().donationId);",
+                  "pm.test(\"don rattache a donor.a\", () => pm.expect(pm.response.json().donorId).to.eql(\"8f098e43-e3c0-4143-aac7-dc0a9a7bffbd\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"category\":\"EDUCATION\",\"type\":true,\"amount\":80}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "C4 - donor.a GET /donations/me -> liste contenant le don",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"liste de mes dons contient le nouveau don\", () => pm.expect(pm.response.json().map(d => d.donationId)).to.include(pm.collectionVariables.get(\"myDonationId\")));",
+                  "pm.test(\"uniquement mes dons\", () => pm.response.json().forEach(d => pm.expect(d.donorId).to.eql(\"8f098e43-e3c0-4143-aac7-dc0a9a7bffbd\")));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/me"
+          }
+        },
+        {
+          "name": "C5 - donor.a GET /donations/me/{id} -> 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/me/{{myDonationId}}"
+          }
+        },
+        {
+          "name": "C6 - donor.b GET /donations/me/{id de donor.a} -> 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorBToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/me/{{myDonationId}}"
+          }
+        },
+        {
+          "name": "C7 - donor.b GET /donors/me (sans profil) -> 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorBToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors/me"
+          }
+        },
+        {
+          "name": "C8 - donor.b POST /donations/me (sans profil) -> 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorBToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"category\":\"FOOD\",\"type\":true,\"amount\":10}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "C9 - donor.a GET /donations (liste globale) -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations"
+          }
+        },
+        {
+          "name": "C10 - agent GET /donations/by-donor/{party_id de donor.a} -> voit le don",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"l'agent voit le don de donor.a\", () => pm.expect(pm.response.json().map(d => d.donationId)).to.include(pm.collectionVariables.get(\"myDonationId\")));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/by-donor/8f098e43-e3c0-4143-aac7-dc0a9a7bffbd"
+          }
+        },
+        {
+          "name": "C11 - agent GET /donors/me (pas de permission :own) -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors/me"
+          }
+        },
+        {
+          "name": "C12 - benef.a POST /donors/me -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{benefToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"lastName\":\"A\",\"firstName\":\"Benef\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
     }
   ],
   "variable": [
@@ -1942,7 +2440,15 @@
       "value": ""
     },
     {
+      "key": "donorBToken",
+      "value": ""
+    },
+    {
       "key": "benefToken",
+      "value": ""
+    },
+    {
+      "key": "myDonationId",
       "value": ""
     },
     {

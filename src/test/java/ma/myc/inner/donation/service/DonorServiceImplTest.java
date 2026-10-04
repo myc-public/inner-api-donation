@@ -3,6 +3,7 @@ package ma.myc.inner.donation.service;
 import ma.myc.inner.donation.domain.bo.DonorBO;
 import ma.myc.inner.donation.domain.dto.CreateDonorRequest;
 import ma.myc.inner.donation.domain.dto.DonorResponse;
+import ma.myc.inner.donation.domain.dto.RegisterDonorRequest;
 import ma.myc.inner.donation.domain.dto.UpdateDonorRequest;
 import ma.myc.inner.donation.exception.DonorAlreadyExistsException;
 import ma.myc.inner.donation.exception.NotFoundException;
@@ -11,6 +12,7 @@ import ma.myc.inner.donation.repository.DonorRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -221,5 +223,50 @@ class DonorServiceImplTest {
 
         assertThatThrownBy(() -> donorService.delete(DONOR_ID))
                 .isInstanceOf(NotFoundException.class);
+    }
+
+    // ─── registerSelf (K4c) ───────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("registerSelf: creates the profile with the given id (party_id) and the token email, never a generated id")
+    void registerSelf_success() {
+        var request = new RegisterDonorRequest("Doe", "John", LocalDate.of(1990, 1, 1), "MA");
+        when(donorRepository.existsById(DONOR_ID)).thenReturn(false);
+        when(donorRepository.existsByEmail(EMAIL)).thenReturn(false);
+        when(donorRepository.save(any(DonorBO.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(donorMapper.toResponse(any(DonorBO.class))).thenReturn(buildDonorResponse());
+
+        donorService.registerSelf(DONOR_ID, EMAIL, request);
+
+        ArgumentCaptor<DonorBO> saved = ArgumentCaptor.forClass(DonorBO.class);
+        verify(donorRepository).save(saved.capture());
+        assertThat(saved.getValue().getId()).isEqualTo(DONOR_ID);
+        assertThat(saved.getValue().getEmail()).isEqualTo(EMAIL);
+        verify(donorMapper, never()).toBo(any());
+    }
+
+    @Test
+    @DisplayName("registerSelf: a second profile for the same person is a conflict")
+    void registerSelf_profileExists_conflict() {
+        when(donorRepository.existsById(DONOR_ID)).thenReturn(true);
+
+        assertThatThrownBy(() -> donorService.registerSelf(DONOR_ID, EMAIL,
+                new RegisterDonorRequest("Doe", "John", null, "MA")))
+                .isInstanceOf(DonorAlreadyExistsException.class)
+                .hasMessage(DonorAlreadyExistsException.PROFILE_MESSAGE);
+        verify(donorRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("registerSelf: an email already used by another donor is a conflict")
+    void registerSelf_emailTaken_conflict() {
+        when(donorRepository.existsById(DONOR_ID)).thenReturn(false);
+        when(donorRepository.existsByEmail(EMAIL)).thenReturn(true);
+
+        assertThatThrownBy(() -> donorService.registerSelf(DONOR_ID, EMAIL,
+                new RegisterDonorRequest("Doe", "John", null, "MA")))
+                .isInstanceOf(DonorAlreadyExistsException.class)
+                .hasMessage(DonorAlreadyExistsException.MESSAGE);
+        verify(donorRepository, never()).save(any());
     }
 }
