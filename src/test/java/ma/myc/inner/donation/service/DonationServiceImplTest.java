@@ -55,7 +55,6 @@ class DonationServiceImplTest {
     private static final UUID DONATION_ID = UUID.randomUUID();
     private static final UUID DONOR_ID = UUID.randomUUID();
     private static final Instant NOW = Instant.now();
-    private static final String TOPIC = "donation-event";
     private static final String PRODUCER = "donation-service";
 
     @BeforeEach
@@ -63,7 +62,7 @@ class DonationServiceImplTest {
         donationService = new DonationServiceImpl(
                 donationRepository, donorRepository, donationMapper,
                 donationEventMapper, outboxFactory, outboxEventRepository, auditRecorder,
-                TOPIC, PRODUCER
+                PRODUCER
         );
     }
 
@@ -102,7 +101,7 @@ class DonationServiceImplTest {
         when(donationRepository.save(donation)).thenReturn(donation);
         when(donationEventMapper.toDonationCreatedEnvelope(donation,
                 new DonorSnapshot(DONOR_ID, DB_DATE_OF_BIRTH, DB_COUNTRY), PRODUCER)).thenReturn(envelope);
-        when(outboxFactory.newEvent(TOPIC, DONATION_ID.toString(), envelope)).thenReturn(outboxEvent);
+        when(outboxFactory.newEvent(envelope)).thenReturn(outboxEvent);
         when(donationMapper.toResponse(donation)).thenReturn(response);
         return outboxEvent;
     }

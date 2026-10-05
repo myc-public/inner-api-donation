@@ -5,6 +5,7 @@ import io.micrometer.tracing.TraceContext;
 import io.micrometer.tracing.Tracer;
 import ma.myc.inner.donation.config.security.Actor;
 import ma.myc.inner.donation.config.security.CurrentParty;
+import ma.myc.inner.donation.domain.bo.DonationBO;
 import ma.myc.inner.donation.domain.bo.DonationCategory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -107,6 +108,38 @@ class AuditRecorderTest {
         assertThat(doc.at("/changes/0/before").asString()).isEqualTo("FOOD");
         assertThat(doc.at("/changes/0/after").asString()).isEqualTo("HEALTH");
         assertThat(doc.has("snapshot")).isFalse();
+    }
+
+    @Test
+    @DisplayName("PATCH amount 120 on a donation of 50.00: before / after in the same format (50.00 -> 120.00)")
+    void donationUpdated_amountSameScale() {
+        when(currentParty.actor()).thenReturn(AGENT);
+        DonationBO donation = new DonationBO(DONATION_ID, DonationCategory.FOOD, true, new BigDecimal("50.00"),
+                DONOR_ID, STATE.timestamp());
+        DonationState before = DonationState.of(donation);
+        donation.setAmount(new BigDecimal("120")); // montant tel qu'envoye par le client, avant relecture en base
+
+        auditRecorder.donationUpdated(DONATION_ID, DONOR_ID, before, DonationState.of(donation));
+
+        JsonNode change = jsonMapper.readTree(savedRow().getPayload()).at("/changes/0");
+        assertThat(change.get("field").asString()).isEqualTo("amount");
+        assertThat(change.get("before").asString()).isEqualTo("50.00");
+        assertThat(change.get("after").asString()).isEqualTo("120.00");
+    }
+
+    @Test
+    @DisplayName("occurredAt truncated to the millisecond, same value in the payload and in the column")
+    void occurredAt_milliseconds() {
+        when(currentParty.actor()).thenReturn(AGENT);
+        var recorder = new AuditRecorder(auditOutboxRepository, currentParty, jsonMapper,
+                Clock.fixed(Instant.parse("2026-10-05T10:38:40.083022600Z"), ZoneOffset.UTC), Tracer.NOOP);
+
+        recorder.donationDeleted(DONATION_ID, DONOR_ID, STATE);
+
+        AuditOutboxBO row = savedRow();
+        assertThat(row.getOccurredAt()).isEqualTo(Instant.parse("2026-10-05T10:38:40.083Z"));
+        assertThat(jsonMapper.readTree(row.getPayload()).get("occurredAt").asString())
+                .isEqualTo("2026-10-05T10:38:40.083Z");
     }
 
     @Test

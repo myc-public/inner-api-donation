@@ -4,6 +4,7 @@ import ma.myc.inner.donation.domain.bo.DonationBO;
 import ma.myc.inner.donation.domain.bo.DonationCategory;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,9 +16,14 @@ import java.util.Objects;
  */
 public record DonationState(DonationCategory category, boolean type, BigDecimal amount, Instant timestamp) {
 
+    /** Echelle de la colonne amount (DECIMAL(19,2)) : meme format avant / apres, quel que soit le montant envoye. */
+    private static final int AMOUNT_SCALE = 2;
+
     public static DonationState of(DonationBO donation) {
-        return new DonationState(donation.getCategory(), donation.isType(), donation.getAmount(),
-                donation.getTimestamp());
+        // Apres un PATCH, l'entite porte le montant tel qu'envoye (120) : normalise comme en base (120.00)
+        BigDecimal amount = donation.getAmount() != null
+                ? donation.getAmount().setScale(AMOUNT_SCALE, RoundingMode.HALF_UP) : null;
+        return new DonationState(donation.getCategory(), donation.isType(), amount, donation.getTimestamp());
     }
 
     /** Champs differents entre deux etats, dans l'ordre du record ; vide si rien n'a change. */
