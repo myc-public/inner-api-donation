@@ -31,8 +31,6 @@ class OutboxFactoryTest {
     private static final Instant NOW = Instant.parse("2026-01-15T10:00:00Z");
     private static final Instant OCCURRED_AT = Instant.parse("2026-01-15T09:59:58Z");
     private static final UUID EVENT_ID = UUID.randomUUID();
-    private static final String TOPIC = "donation-event";
-    private static final String KEY = "donation-42";
     private static final String TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
 
     // Vrai mapper Jackson 3 (pas de mock) : on verifie la serialisation reelle de l'outbox
@@ -62,7 +60,7 @@ class OutboxFactoryTest {
         }).when(propagator).inject(eq(traceContext), any(Map.class), any(Propagator.Setter.class));
         var factory = new OutboxFactory(jsonMapper, Clock.fixed(NOW, ZoneOffset.UTC), tracer, propagator);
 
-        OutboxEventBO event = factory.newEvent(TOPIC, KEY, envelope("donation-service", new Payload("donation-42", 150)));
+        OutboxEventBO event = factory.newEvent(envelope("donation-service", new Payload("donation-42", 150)));
 
         assertThat(jsonMapper.readTree(event.getHeaders()).get("traceparent").asString()).isEqualTo(TRACEPARENT);
     }
@@ -70,7 +68,7 @@ class OutboxFactoryTest {
     @Test
     @DisplayName("newEvent : sans trace active, aucun header traceparent")
     void newEvent_omitsTraceparentWithoutActiveTrace() {
-        OutboxEventBO event = outboxFactory.newEvent(TOPIC, KEY, envelope("donation-service", new Payload("donation-42", 150)));
+        OutboxEventBO event = outboxFactory.newEvent(envelope("donation-service", new Payload("donation-42", 150)));
 
         assertThat(jsonMapper.readTree(event.getHeaders()).has("traceparent")).isFalse();
     }
@@ -78,15 +76,13 @@ class OutboxFactoryTest {
     @Test
     @DisplayName("newEvent : copie les metadonnees de l'enveloppe et serialise payload + headers en JSON")
     void newEvent_mapsEnvelopeAndSerializesJson() {
-        OutboxEventBO event = outboxFactory.newEvent(TOPIC, KEY, envelope("donation-service", new Payload("donation-42", 150)));
+        OutboxEventBO event = outboxFactory.newEvent(envelope("donation-service", new Payload("donation-42", 150)));
 
         assertThat(event.getId()).isEqualTo(EVENT_ID);
         assertThat(event.getAggregateType()).isEqualTo("Donation");
         assertThat(event.getAggregateId()).isEqualTo("donation-42");
         assertThat(event.getEventType()).isEqualTo("DonationCreated");
         assertThat(event.getEventVersion()).isEqualTo("1");
-        assertThat(event.getTopic()).isEqualTo(TOPIC);
-        assertThat(event.getMessageKey()).isEqualTo(KEY);
         // Date d'ecriture en outbox = horloge injectee, pas la date metier de l'enveloppe
         assertThat(event.getOccurredAt()).isEqualTo(NOW);
 
@@ -103,7 +99,7 @@ class OutboxFactoryTest {
     @Test
     @DisplayName("newEvent : le header producer est omis quand il est vide")
     void newEvent_omitsBlankProducerHeader() {
-        OutboxEventBO event = outboxFactory.newEvent(TOPIC, KEY, envelope("  ", new Payload("donation-42", 150)));
+        OutboxEventBO event = outboxFactory.newEvent(envelope("  ", new Payload("donation-42", 150)));
 
         assertThat(jsonMapper.readTree(event.getHeaders()).has("producer")).isFalse();
     }
@@ -113,7 +109,7 @@ class OutboxFactoryTest {
     void newEvent_wrapsSerializationFailure() {
         var envelope = envelope("donation-service", new FailingPayload());
 
-        assertThatThrownBy(() -> outboxFactory.newEvent(TOPIC, KEY, envelope))
+        assertThatThrownBy(() -> outboxFactory.newEvent(envelope))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Failed to serialize event to JSON")
                 .hasCauseInstanceOf(JacksonException.class);

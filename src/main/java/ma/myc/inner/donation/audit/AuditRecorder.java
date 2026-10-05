@@ -9,6 +9,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -50,7 +51,8 @@ public class AuditRecorder {
 
     private void record(String eventType, String action, UUID donationId, UUID donorId,
                         DonationState snapshot, List<AuditEvent.Change> changes) {
-        Instant now = Instant.now(clock);
+        // A la milliseconde (DA3, type date d'Elasticsearch) : meme valeur dans le payload et dans la colonne
+        Instant now = Instant.now(clock).truncatedTo(ChronoUnit.MILLIS);
         AuditEvent event = new AuditEvent(UUID.randomUUID(), eventType, EVENT_VERSION, now, currentParty.actor(),
                 action, new AuditEvent.Resource(RESOURCE_DONATION, donationId, donorId), snapshot, changes, traceId());
         auditOutboxRepository.save(new AuditOutboxBO(event.eventId(), eventType, EVENT_VERSION,

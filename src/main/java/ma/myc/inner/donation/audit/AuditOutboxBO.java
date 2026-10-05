@@ -24,7 +24,7 @@ public class AuditOutboxBO {
     private String eventVersion;
 
     @Column(name = "aggregate_id", nullable = false, updatable = false, length = 80)
-    private String aggregateId; // donationId = cle du message Kafka
+    private String aggregateId; // donationId
 
     @Lob
     @Column(name = "payload", nullable = false, updatable = false, columnDefinition = "TEXT")

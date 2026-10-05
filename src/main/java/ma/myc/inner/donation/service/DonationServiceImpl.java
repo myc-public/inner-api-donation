@@ -41,7 +41,6 @@ public class DonationServiceImpl implements DonationService {
     private final OutboxEventRepository outboxEventRepository;
     private final AuditRecorder auditRecorder;
 
-    private final String donationTopic;
     private final String producerName;
 
     public DonationServiceImpl(DonationRepository donationRepository,
@@ -51,7 +50,6 @@ public class DonationServiceImpl implements DonationService {
                                OutboxFactory outboxFactory,
                                OutboxEventRepository outboxEventRepository,
                                AuditRecorder auditRecorder,
-                               @Value("${app.kafka.topics.donation-event:donation-event}") String donationTopic,
                                @Value("${spring.application.name:donation-service}") String producerName) {
         this.donationRepository = donationRepository;
         this.donorRepository = donorRepository;
@@ -60,7 +58,6 @@ public class DonationServiceImpl implements DonationService {
         this.outboxFactory = outboxFactory;
         this.outboxEventRepository = outboxEventRepository;
         this.auditRecorder = auditRecorder;
-        this.donationTopic = donationTopic;
         this.producerName = producerName;
     }
 
@@ -84,12 +81,8 @@ public class DonationServiceImpl implements DonationService {
                 producerName
         );
 
-        // Key = donationId (ordering par donation)
-        var outbox = outboxFactory.newEvent(
-                donationTopic,
-                saved.getId().toString(),
-                envelope
-        );
+        // Faits metier seulement : le CDC route (topic) et ordonne (cle = aggregate_id = donationId)
+        var outbox = outboxFactory.newEvent(envelope);
         outboxEventRepository.save(outbox);
 
         return donationMapper.toResponse(saved);

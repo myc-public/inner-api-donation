@@ -16,11 +16,11 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * Metriques metier derivees des evenements du domaine (pattern outbox) : une metrique metier = un evenement publie.
  * Les services ne connaissent pas la telemetrie ; seuls les evenements reellement commites sont comptes (AFTER_COMMIT) ;
- * la source est le contrat JSON publie, celui que liront les consommateurs Kafka.
+ * la source est le contrat JSON publie, celui que liront les consommateurs des evenements.
  * Etiquettes a faible cardinalite uniquement : jamais d'identifiant, montants agreges (jamais par personne).
  *
- * TODO CDC : quand Debezium (binlog MySQL -> Kafka, outbox event router) sera en place, remplacer ce listener
- * par un consommateur Kafka qui calcule les MEMES metriques (memes noms, memes etiquettes) : dashboards et
+ * TODO CDC : quand le CDC (autre composant) diffusera l'outbox, remplacer ce listener par un consommateur
+ * des evenements qui calcule les MEMES metriques (memes noms, memes etiquettes) : dashboards et
  * alertes inchanges, couplage nul avec l'application.
  */
 @Component

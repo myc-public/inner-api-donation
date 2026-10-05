@@ -17,7 +17,6 @@ import java.util.Map;
 @Component
 public class OutboxFactory {
 
-    //TODO to refactor voir s'il y a des outils meilleurs dans kafka
     private final JsonMapper jsonMapper;
     private final Clock clock;
     private final Tracer tracer;
@@ -29,7 +28,7 @@ public class OutboxFactory {
         this.tracer = tracer;
         this.propagator = propagator;
     }
-    public OutboxEventBO newEvent(String topic, String key, EventEnvelope<?> envelope) {
+    public OutboxEventBO newEvent(EventEnvelope<?> envelope) {
         Instant now = Instant.now(clock);
 
         String payloadJson = writeJson(envelope);
@@ -45,7 +44,7 @@ public class OutboxFactory {
         // optionnels -> uniquement si non null / non blank
         putIfNotNull(headers, "producer", envelope.producer());
 
-        // Contexte de trace W3C (traceparent, tracestate) : le relais Kafka le recopiera dans les headers du
+        // Contexte de trace W3C (traceparent, tracestate) : le CDC le recopiera dans les en-tetes du
         // message, la trace continuera cote consommateur (propagation asynchrone)
         TraceContext traceContext = tracer.currentTraceContext().context();
         if (traceContext != null) {
@@ -60,8 +59,6 @@ public class OutboxFactory {
                 envelope.aggregateId(),
                 envelope.eventType(),
                 envelope.eventVersion(),
-                topic,
-                key,
                 payloadJson,
                 headersJson,
                 now
