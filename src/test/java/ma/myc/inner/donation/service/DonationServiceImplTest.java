@@ -1,5 +1,7 @@
 package ma.myc.inner.donation.service;
 
+import ma.myc.inner.donation.audit.AuditRecorder;
+import ma.myc.inner.donation.audit.DonationState;
 import ma.myc.inner.donation.domain.bo.DonationBO;
 import ma.myc.inner.donation.domain.bo.DonationCategory;
 import ma.myc.inner.donation.domain.bo.DonorBO;
@@ -46,6 +48,7 @@ class DonationServiceImplTest {
     @Mock private DonationEventMapper donationEventMapper;
     @Mock private OutboxFactory outboxFactory;
     @Mock private OutboxEventRepository outboxEventRepository;
+    @Mock private AuditRecorder auditRecorder;
 
     private DonationServiceImpl donationService;
 
@@ -59,7 +62,7 @@ class DonationServiceImplTest {
     void setUp() {
         donationService = new DonationServiceImpl(
                 donationRepository, donorRepository, donationMapper,
-                donationEventMapper, outboxFactory, outboxEventRepository,
+                donationEventMapper, outboxFactory, outboxEventRepository, auditRecorder,
                 TOPIC, PRODUCER
         );
     }
@@ -114,6 +117,8 @@ class DonationServiceImplTest {
 
         assertThat(donationService.create(request)).isEqualTo(expected);
         verify(outboxEventRepository).save(outboxEvent);
+        // Hors perimetre de l'audit (DA1) : seules la modification et la suppression sont auditees
+        verifyNoInteractions(auditRecorder);
     }
 
     @Test
@@ -230,18 +235,28 @@ class DonationServiceImplTest {
     // ─── update ───────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("update: patches donation and returns updated response")
+    @DisplayName("update: patches donation and audits the state before and after the PATCH")
     void update_success() {
         DonationBO donation = buildDonationBO();
         var request = new UpdateDonationRequest(DonationCategory.FOOD, true, new BigDecimal("200.00"));
         DonationResponse expected = buildDonationResponse();
 
+        DonationState before = DonationState.of(donation);
         when(donationRepository.findById(DONATION_ID)).thenReturn(Optional.of(donation));
+        // Le vrai mapper modifie l'entite en place : l'audit doit avoir pris l'etat AVANT
+        doAnswer(inv -> {
+            donation.setCategory(DonationCategory.FOOD);
+            donation.setType(true);
+            donation.setAmount(new BigDecimal("200.00"));
+            return null;
+        }).when(donationMapper).patch(donation, request);
         when(donationRepository.save(donation)).thenReturn(donation);
         when(donationMapper.toResponse(donation)).thenReturn(expected);
 
         assertThat(donationService.update(DONATION_ID, request)).isEqualTo(expected);
         verify(donationMapper).patch(donation, request);
+        verify(auditRecorder).donationUpdated(DONATION_ID, DONOR_ID, before, DonationState.of(donation));
+        assertThat(before.category()).isEqualTo(DonationCategory.HEALTH);
     }
 
     @Test
@@ -252,12 +267,13 @@ class DonationServiceImplTest {
 
         assertThatThrownBy(() -> donationService.update(DONATION_ID, request))
                 .isInstanceOf(NotFoundException.class);
+        verifyNoInteractions(auditRecorder);
     }
 
     // ─── delete ───────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("delete: deletes donation when found")
+    @DisplayName("delete: deletes donation when found and audits its last state")
     void delete_success() {
         DonationBO donation = buildDonationBO();
         when(donationRepository.findById(DONATION_ID)).thenReturn(Optional.of(donation));
@@ -265,6 +281,7 @@ class DonationServiceImplTest {
         donationService.delete(DONATION_ID);
 
         verify(donationRepository).delete(donation);
+        verify(auditRecorder).donationDeleted(DONATION_ID, DONOR_ID, DonationState.of(donation));
     }
 
     @Test
@@ -274,6 +291,7 @@ class DonationServiceImplTest {
 
         assertThatThrownBy(() -> donationService.delete(DONATION_ID))
                 .isInstanceOf(NotFoundException.class);
+        verifyNoInteractions(auditRecorder);
     }
 
     // ─── libre-service du donateur (K4c) ──────────────────────────────────────

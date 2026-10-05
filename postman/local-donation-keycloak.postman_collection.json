@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "local-donation-keycloak",
-    "description": "Tests de donation-api en local, securisee par Keycloak (lots K1 a K4b : realms myc-internal et myc-customers, contrat de claims) : sante, tokens (client credentials et connexion utilisateur code + PKCE automatisee), authentification, matrice RBAC (modele C), CORS.\n\nPrerequis : Keycloak local (gitops-platform/local/keycloak), MySQL (inner-donation-api/local) et l'API (mvn spring-boot:run). Environnement : local-donation-keycloak (secrets a recopier depuis gitops-platform/local/keycloak/.env). Lancer avec le Collection Runner, dans l'ordre (les tokens durent 5 minutes : relancer toute la collection plutot qu'un dossier isole).",
+    "description": "Tests de donation-api en local, securisee par Keycloak (lots K1 a K4d : realms myc-internal et myc-customers, contrat de claims, ABAC donateur, audit) : sante, tokens (client credentials et connexion utilisateur code + PKCE automatisee), authentification, matrice RBAC (modele C), CORS, console de compte, ABAC donateur, audit.\n\nPrerequis : Keycloak local (gitops-platform/local/keycloak), MySQL (inner-donation-api/local) et l'API (mvn spring-boot:run). Environnement : local-donation-keycloak (secrets a recopier depuis gitops-platform/local/keycloak/.env). Lancer avec le Collection Runner, dans l'ordre (les tokens durent 5 minutes : relancer toute la collection plutot qu'un dossier isole).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -2408,6 +2408,256 @@
           }
         }
       ]
+    },
+    {
+      "name": "07 - Audit (K4d)",
+      "item": [
+        {
+          "name": "A1 - token agent.casa : team_id et preferred_username (contrat de claims)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const claims = (t) => JSON.parse(Buffer.from(t.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\"), \"base64\").toString());",
+                  "const perms = (t) => (claims(t).permissions || []).slice().sort();",
+                  "const c = claims(pm.collectionVariables.get(\"agentToken\"));",
+                  "pm.test(\"team_id = casablanca (attribut du groupe agents/casablanca)\", () => pm.expect(c.team_id).to.eql(\"casablanca\"));",
+                  "pm.test(\"preferred_username = agent.casa\", () => pm.expect(c.preferred_username).to.eql(\"agent.casa\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/management/health"
+          }
+        },
+        {
+          "name": "A2 - token admin.test : preferred_username, pas de team_id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const claims = (t) => JSON.parse(Buffer.from(t.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\"), \"base64\").toString());",
+                  "const perms = (t) => (claims(t).permissions || []).slice().sort();",
+                  "const c = claims(pm.collectionVariables.get(\"adminToken\"));",
+                  "pm.test(\"preferred_username = admin.test\", () => pm.expect(c.preferred_username).to.eql(\"admin.test\"));",
+                  "pm.test(\"pas de team_id pour un admin\", () => pm.expect(c).to.not.have.property(\"team_id\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/management/health"
+          }
+        },
+        {
+          "name": "A3 - admin POST /donations (don de donor.a) -> 201, non audite",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"auditDonationId\", pm.response.json().donationId);",
+                  "console.log(\"auditDonationId = \" + pm.response.json().donationId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"category\":\"FOOD\",\"type\":true,\"amount\":50,\"donor\":{\"donorId\":\"8f098e43-e3c0-4143-aac7-dc0a9a7bffbd\"}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "A4 - admin PATCH /donations/{id} (amount, category) -> 200, audite DonationUpdated",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{auditDonationId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount\":120,\"category\":\"HEALTH\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "A5 - agent PATCH /donations/{id} -> 403, non audite",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{auditDonationId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount\":999}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "A6 - superviseur DELETE /donations/{id} -> 403, non audite",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supervisorToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{auditDonationId}}"
+          }
+        },
+        {
+          "name": "A7 - admin DELETE /donations/{id} -> 204, audite DonationDeleted",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{auditDonationId}}"
+          }
+        },
+        {
+          "name": "A8 - admin PATCH /donations/{id} supprime -> 404, non audite (rollback)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{auditDonationId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount\":130}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "Attendu en base pour auditDonationId (affiche dans la console Postman) : exactement 2 lignes audit_outbox, DonationUpdated (changes amount 50.00 -> 120.00, category FOOD -> HEALTH) puis DonationDeleted (snapshot), auteur admin.test. Aucune ligne pour A3, A5, A6, A8."
     }
   ],
   "variable": [
@@ -2449,6 +2699,10 @@
     },
     {
       "key": "myDonationId",
+      "value": ""
+    },
+    {
+      "key": "auditDonationId",
       "value": ""
     },
     {
