@@ -1,6 +1,8 @@
 package ma.myc.inner.donation.service;
 
 import jakarta.transaction.Transactional;
+import ma.myc.inner.donation.audit.AuditRecorder;
+import ma.myc.inner.donation.audit.DonationState;
 import ma.myc.inner.donation.domain.bo.DonationBO;
 import ma.myc.inner.donation.domain.bo.DonorBO;
 import ma.myc.inner.donation.domain.dto.CreateDonationRequest;
@@ -37,6 +39,7 @@ public class DonationServiceImpl implements DonationService {
     private final DonationEventMapper donationEventMapper;
     private final OutboxFactory outboxFactory;
     private final OutboxEventRepository outboxEventRepository;
+    private final AuditRecorder auditRecorder;
 
     private final String donationTopic;
     private final String producerName;
@@ -47,6 +50,7 @@ public class DonationServiceImpl implements DonationService {
                                DonationEventMapper donationEventMapper,
                                OutboxFactory outboxFactory,
                                OutboxEventRepository outboxEventRepository,
+                               AuditRecorder auditRecorder,
                                @Value("${app.kafka.topics.donation-event:donation-event}") String donationTopic,
                                @Value("${spring.application.name:donation-service}") String producerName) {
         this.donationRepository = donationRepository;
@@ -55,6 +59,7 @@ public class DonationServiceImpl implements DonationService {
         this.donationEventMapper = donationEventMapper;
         this.outboxFactory = outboxFactory;
         this.outboxEventRepository = outboxEventRepository;
+        this.auditRecorder = auditRecorder;
         this.donationTopic = donationTopic;
         this.producerName = producerName;
     }
@@ -131,14 +136,22 @@ public class DonationServiceImpl implements DonationService {
     public DonationResponse update(UUID donationId, UpdateDonationRequest request) {
         log.info("Updating donation donationId={}", donationId);
         DonationBO donation = findDonation(donationId);
+        // Etat AVANT le PATCH (le mapper modifie l'entite en place) : base des changes de l'audit
+        DonationState before = DonationState.of(donation);
         donationMapper.patch(donation, request);
-        return donationMapper.toResponse(donationRepository.save(donation));
+        DonationBO saved = donationRepository.save(donation);
+        // Meme transaction : audite si et seulement si la modification est commitee (K4d, DA1)
+        auditRecorder.donationUpdated(donationId, saved.getDonorId(), before, DonationState.of(saved));
+        return donationMapper.toResponse(saved);
     }
 
     @Override
     public void delete(UUID donationId) {
         log.info("Deleting donation donationId={}", donationId);
-        donationRepository.delete(findDonation(donationId));
+        DonationBO donation = findDonation(donationId);
+        donationRepository.delete(donation);
+        // La ligne disparait : l'audit garde son dernier etat (snapshot), dans la meme transaction (K4d, DA3)
+        auditRecorder.donationDeleted(donationId, donation.getDonorId(), DonationState.of(donation));
     }
 
     private DonationBO findDonation(UUID donationId) {
