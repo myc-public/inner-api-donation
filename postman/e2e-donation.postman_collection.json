@@ -1,0 +1,3562 @@
+{
+  "info": {
+    "name": "e2e-donation",
+    "description": "Tests de bout en bout de donation-api (K1 a K5) : sante, tokens (client credentials, code + PKCE), authentification, RBAC, CORS, console de compte, ABAC donateur, audit, parcours metier complet, passerelles (WAF, liste blanche, jetons falsifies, scopes, en-tetes, isolation reseau, limitation de debit).\n\nDeux environnements : e2e-dev (API et Keycloak en direct) et e2e-pile (tout via APISIX, https://localhost:8443). Le dossier 08 ne s'execute qu'en mode pile. Plan de test : postman/PLAN-DE-TEST-E2E.md. Mode pile : certificat auto-signe, desactiver la verification SSL de Postman (ou newman --insecure).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 - Sante et Keycloak",
+      "item": [
+        {
+          "name": "S1 - GET /management/health (sonde publique) (pile : 404, non expose)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pile = pm.environment.get(\"mode\") === \"pile\";",
+                  "if (pile) { pm.test(\"mode pile : non expose par APISIX externe (404)\", () => pm.response.to.have.status(404)); }",
+                  "else { pm.test(\"mode dev : statut 200\", () => pm.response.to.have.status(200)); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/management/health"
+          }
+        },
+        {
+          "name": "S2 - GET /management/info (version) (pile : 404, non expose)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pile = pm.environment.get(\"mode\") === \"pile\";",
+                  "if (pile) { pm.test(\"mode pile : non expose par APISIX externe (404)\", () => pm.response.to.have.status(404)); }",
+                  "else { pm.test(\"mode dev : statut 200\", () => pm.response.to.have.status(200)); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/management/info"
+          }
+        },
+        {
+          "name": "S3 - GET /management/loggers sans compte -> 401 (pile : 404, non expose)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pile = pm.environment.get(\"mode\") === \"pile\";",
+                  "if (pile) { pm.test(\"mode pile : non expose par APISIX externe (404)\", () => pm.response.to.have.status(404)); }",
+                  "else { pm.test(\"mode dev : statut 401\", () => pm.response.to.have.status(401)); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/management/loggers"
+          }
+        },
+        {
+          "name": "S4 - GET /docs/api-docs (contrat OpenAPI) (pile : 404, non expose)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pile = pm.environment.get(\"mode\") === \"pile\";",
+                  "if (pile) { pm.test(\"mode pile : non expose par APISIX externe (404)\", () => pm.response.to.have.status(404)); }",
+                  "else { pm.test(\"mode dev : statut 200\", () => pm.response.to.have.status(200)); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/docs/api-docs"
+          }
+        },
+        {
+          "name": "K1a - Keycloak : realm myc-internal en ligne",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"issuer = myc-internal\", () => pm.expect(pm.response.json().issuer).to.eql(pm.environment.get(\"keycloakUrl\") + \"/realms/myc-internal\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-internal/.well-known/openid-configuration"
+          }
+        },
+        {
+          "name": "K1b - Keycloak : realm myc-customers en ligne",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"issuer = myc-customers\", () => pm.expect(pm.response.json().issuer).to.eql(pm.environment.get(\"keycloakUrl\") + \"/realms/myc-customers\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-customers/.well-known/openid-configuration"
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 - Tokens (clients et utilisateurs)",
+      "item": [
+        {
+          "name": "Token donation-service (myc-internal, client credentials, donation:read)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const claims = (t) => JSON.parse(Buffer.from(t.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\"), \"base64\").toString());",
+                  "const perms = (t) => (claims(t).permissions || []).slice().sort();",
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json().access_token;",
+                  "pm.collectionVariables.set(\"svcToken\", t);",
+                  "pm.test(\"K2 - permissions = lecture seule\", () => pm.expect(perms(t)).to.eql([\"donation:list\", \"donation:read\", \"donor:list\", \"donor:read\"]));",
+                  "pm.test(\"K3 - aud = donation-api\", () => pm.expect(claims(t).aud).to.eql(\"donation-api\"));",
+                  "pm.test(\"K4 - actor_type = internal\", () => pm.expect(claims(t).actor_type).to.eql(\"internal\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-internal/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                },
+                {
+                  "key": "client_id",
+                  "value": "donation-service"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{donationServiceClientSecret}}"
+                },
+                {
+                  "key": "scope",
+                  "value": "donation:read"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Token donation-service SANS scope",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"svcNoScopeToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-internal/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                },
+                {
+                  "key": "client_id",
+                  "value": "donation-service"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{donationServiceClientSecret}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Login admin.test (myc-internal) 1/3 - page de login + PKCE",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// PKCE : code_verifier aleatoire, code_challenge = BASE64URL(SHA256(verifier))",
+                  "const cryptoJs = require(\"crypto-js\");",
+                  "const alphabet = \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\";",
+                  "let verifier = \"\";",
+                  "for (let i = 0; i < 64; i++) verifier += alphabet.charAt(Math.floor(Math.random() * alphabet.length));",
+                  "const challenge = cryptoJs.SHA256(verifier).toString(cryptoJs.enc.Base64).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\");",
+                  "pm.collectionVariables.set(\"pkceVerifier\", verifier);",
+                  "pm.collectionVariables.set(\"pkceChallenge\", challenge);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "// Keycloak pose ses cookies en Secure/SameSite=None : on les renvoie nous-memes a l'etape suivante",
+                  "const cookies = pm.response.headers.all().filter(h => h.key.toLowerCase() === \"set-cookie\").map(h => h.value.split(\";\")[0]).join(\"; \");",
+                  "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
+                  "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
+                  "pm.collectionVariables.set(\"kcCookies\", cookies);",
+                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-internal/protocol/openid-connect/auth?client_id=donation-tests&response_type=code&scope=openid%20donation%3Aread%20donation%3Awrite&redirect_uri=https%3A%2F%2Foauth.pstmn.io%2Fv1%2Fcallback&code_challenge={{pkceChallenge}}&code_challenge_method=S256&state=local"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Login admin.test (myc-internal) 2/3 - identifiants",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"redirection vers le client (302)\", () => pm.response.to.have.status(302));",
+                  "const location = pm.response.headers.get(\"Location\") || \"\";",
+                  "const code = (location.match(/[?&]code=([^&]+)/) || [])[1];",
+                  "pm.test(\"code d'autorisation recu\", () => pm.expect(code).to.be.a(\"string\"));",
+                  "pm.collectionVariables.set(\"authCode\", code);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "{{kcCookies}}"
+              }
+            ],
+            "url": "{{loginAction}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "username",
+                  "value": "admin.test"
+                },
+                {
+                  "key": "password",
+                  "value": "{{testUsersPassword}}"
+                },
+                {
+                  "key": "credentialId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false,
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Login admin.test (myc-internal) 3/3 - echange du code (PKCE)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const claims = (t) => JSON.parse(Buffer.from(t.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\"), \"base64\").toString());",
+                  "const perms = (t) => (claims(t).permissions || []).slice().sort();",
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json().access_token;",
+                  "pm.collectionVariables.set(\"adminToken\", t);",
+                  "pm.test(\"R1 - admin.test : 10 permissions globales\", () => pm.expect(perms(t)).to.have.lengthOf(10));",
+                  "pm.test(\"R1b - admin.test : actor_type internal et party_id metier\", () => { pm.expect(claims(t).actor_type).to.eql(\"internal\"); pm.expect(claims(t).party_id).to.eql(\"fe8373eb-32ee-4255-99aa-fa86bf6a6e00\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-internal/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code"
+                },
+                {
+                  "key": "client_id",
+                  "value": "donation-tests"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{donationTestsClientSecret}}"
+                },
+                {
+                  "key": "code",
+                  "value": "{{authCode}}"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://oauth.pstmn.io/v1/callback"
+                },
+                {
+                  "key": "code_verifier",
+                  "value": "{{pkceVerifier}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Login agent.casa (myc-internal) 1/3 - page de login + PKCE",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// PKCE : code_verifier aleatoire, code_challenge = BASE64URL(SHA256(verifier))",
+                  "const cryptoJs = require(\"crypto-js\");",
+                  "const alphabet = \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\";",
+                  "let verifier = \"\";",
+                  "for (let i = 0; i < 64; i++) verifier += alphabet.charAt(Math.floor(Math.random() * alphabet.length));",
+                  "const challenge = cryptoJs.SHA256(verifier).toString(cryptoJs.enc.Base64).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\");",
+                  "pm.collectionVariables.set(\"pkceVerifier\", verifier);",
+                  "pm.collectionVariables.set(\"pkceChallenge\", challenge);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "// Keycloak pose ses cookies en Secure/SameSite=None : on les renvoie nous-memes a l'etape suivante",
+                  "const cookies = pm.response.headers.all().filter(h => h.key.toLowerCase() === \"set-cookie\").map(h => h.value.split(\";\")[0]).join(\"; \");",
+                  "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
+                  "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
+                  "pm.collectionVariables.set(\"kcCookies\", cookies);",
+                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-internal/protocol/openid-connect/auth?client_id=donation-tests&response_type=code&scope=openid%20donation%3Aread%20donation%3Awrite&redirect_uri=https%3A%2F%2Foauth.pstmn.io%2Fv1%2Fcallback&code_challenge={{pkceChallenge}}&code_challenge_method=S256&state=local"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Login agent.casa (myc-internal) 2/3 - identifiants",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"redirection vers le client (302)\", () => pm.response.to.have.status(302));",
+                  "const location = pm.response.headers.get(\"Location\") || \"\";",
+                  "const code = (location.match(/[?&]code=([^&]+)/) || [])[1];",
+                  "pm.test(\"code d'autorisation recu\", () => pm.expect(code).to.be.a(\"string\"));",
+                  "pm.collectionVariables.set(\"authCode\", code);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "{{kcCookies}}"
+              }
+            ],
+            "url": "{{loginAction}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "username",
+                  "value": "agent.casa"
+                },
+                {
+                  "key": "password",
+                  "value": "{{testUsersPassword}}"
+                },
+                {
+                  "key": "credentialId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false,
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Login agent.casa (myc-internal) 3/3 - echange du code (PKCE)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const claims = (t) => JSON.parse(Buffer.from(t.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\"), \"base64\").toString());",
+                  "const perms = (t) => (claims(t).permissions || []).slice().sort();",
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json().access_token;",
+                  "pm.collectionVariables.set(\"agentToken\", t);",
+                  "pm.test(\"R2 - agent.casa : 7 permissions (sans suppression ni modification des dons)\", () => pm.expect(perms(t)).to.eql([\"donation:create\", \"donation:list\", \"donation:read\", \"donor:create\", \"donor:list\", \"donor:read\", \"donor:update\"]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-internal/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code"
+                },
+                {
+                  "key": "client_id",
+                  "value": "donation-tests"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{donationTestsClientSecret}}"
+                },
+                {
+                  "key": "code",
+                  "value": "{{authCode}}"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://oauth.pstmn.io/v1/callback"
+                },
+                {
+                  "key": "code_verifier",
+                  "value": "{{pkceVerifier}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Login superviseur.casa (myc-internal) 1/3 - page de login + PKCE",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// PKCE : code_verifier aleatoire, code_challenge = BASE64URL(SHA256(verifier))",
+                  "const cryptoJs = require(\"crypto-js\");",
+                  "const alphabet = \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\";",
+                  "let verifier = \"\";",
+                  "for (let i = 0; i < 64; i++) verifier += alphabet.charAt(Math.floor(Math.random() * alphabet.length));",
+                  "const challenge = cryptoJs.SHA256(verifier).toString(cryptoJs.enc.Base64).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\");",
+                  "pm.collectionVariables.set(\"pkceVerifier\", verifier);",
+                  "pm.collectionVariables.set(\"pkceChallenge\", challenge);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "// Keycloak pose ses cookies en Secure/SameSite=None : on les renvoie nous-memes a l'etape suivante",
+                  "const cookies = pm.response.headers.all().filter(h => h.key.toLowerCase() === \"set-cookie\").map(h => h.value.split(\";\")[0]).join(\"; \");",
+                  "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
+                  "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
+                  "pm.collectionVariables.set(\"kcCookies\", cookies);",
+                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-internal/protocol/openid-connect/auth?client_id=donation-tests&response_type=code&scope=openid%20donation%3Aread%20donation%3Awrite&redirect_uri=https%3A%2F%2Foauth.pstmn.io%2Fv1%2Fcallback&code_challenge={{pkceChallenge}}&code_challenge_method=S256&state=local"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Login superviseur.casa (myc-internal) 2/3 - identifiants",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"redirection vers le client (302)\", () => pm.response.to.have.status(302));",
+                  "const location = pm.response.headers.get(\"Location\") || \"\";",
+                  "const code = (location.match(/[?&]code=([^&]+)/) || [])[1];",
+                  "pm.test(\"code d'autorisation recu\", () => pm.expect(code).to.be.a(\"string\"));",
+                  "pm.collectionVariables.set(\"authCode\", code);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "{{kcCookies}}"
+              }
+            ],
+            "url": "{{loginAction}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "username",
+                  "value": "superviseur.casa"
+                },
+                {
+                  "key": "password",
+                  "value": "{{testUsersPassword}}"
+                },
+                {
+                  "key": "credentialId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false,
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Login superviseur.casa (myc-internal) 3/3 - echange du code (PKCE)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const claims = (t) => JSON.parse(Buffer.from(t.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\"), \"base64\").toString());",
+                  "const perms = (t) => (claims(t).permissions || []).slice().sort();",
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json().access_token;",
+                  "pm.collectionVariables.set(\"supervisorToken\", t);",
+                  "pm.test(\"R2b - superviseur.casa : droits d'un agent (role composite)\", () => pm.expect(perms(t)).to.eql([\"donation:create\", \"donation:list\", \"donation:read\", \"donor:create\", \"donor:list\", \"donor:read\", \"donor:update\"]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-internal/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code"
+                },
+                {
+                  "key": "client_id",
+                  "value": "donation-tests"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{donationTestsClientSecret}}"
+                },
+                {
+                  "key": "code",
+                  "value": "{{authCode}}"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://oauth.pstmn.io/v1/callback"
+                },
+                {
+                  "key": "code_verifier",
+                  "value": "{{pkceVerifier}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Login donor.a@example.test (myc-customers) 1/3 - page de login + PKCE",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// PKCE : code_verifier aleatoire, code_challenge = BASE64URL(SHA256(verifier))",
+                  "const cryptoJs = require(\"crypto-js\");",
+                  "const alphabet = \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\";",
+                  "let verifier = \"\";",
+                  "for (let i = 0; i < 64; i++) verifier += alphabet.charAt(Math.floor(Math.random() * alphabet.length));",
+                  "const challenge = cryptoJs.SHA256(verifier).toString(cryptoJs.enc.Base64).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\");",
+                  "pm.collectionVariables.set(\"pkceVerifier\", verifier);",
+                  "pm.collectionVariables.set(\"pkceChallenge\", challenge);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "// Keycloak pose ses cookies en Secure/SameSite=None : on les renvoie nous-memes a l'etape suivante",
+                  "const cookies = pm.response.headers.all().filter(h => h.key.toLowerCase() === \"set-cookie\").map(h => h.value.split(\";\")[0]).join(\"; \");",
+                  "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
+                  "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
+                  "pm.collectionVariables.set(\"kcCookies\", cookies);",
+                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-customers/protocol/openid-connect/auth?client_id=donation-tests&response_type=code&scope=openid%20donation%3Aread%20donation%3Awrite&redirect_uri=https%3A%2F%2Foauth.pstmn.io%2Fv1%2Fcallback&code_challenge={{pkceChallenge}}&code_challenge_method=S256&state=local"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Login donor.a@example.test (myc-customers) 2/3 - identifiants",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"redirection vers le client (302)\", () => pm.response.to.have.status(302));",
+                  "const location = pm.response.headers.get(\"Location\") || \"\";",
+                  "const code = (location.match(/[?&]code=([^&]+)/) || [])[1];",
+                  "pm.test(\"code d'autorisation recu\", () => pm.expect(code).to.be.a(\"string\"));",
+                  "pm.collectionVariables.set(\"authCode\", code);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "{{kcCookies}}"
+              }
+            ],
+            "url": "{{loginAction}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "username",
+                  "value": "donor.a@example.test"
+                },
+                {
+                  "key": "password",
+                  "value": "{{testUsersPassword}}"
+                },
+                {
+                  "key": "credentialId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false,
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Login donor.a@example.test (myc-customers) 3/3 - echange du code (PKCE)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const claims = (t) => JSON.parse(Buffer.from(t.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\"), \"base64\").toString());",
+                  "const perms = (t) => (claims(t).permissions || []).slice().sort();",
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json().access_token;",
+                  "pm.collectionVariables.set(\"donorToken\", t);",
+                  "pm.test(\"R3 - donor.a : 5 permissions proprietaire (:own) uniquement\", () => pm.expect(perms(t)).to.eql([\"donation:create:own\", \"donation:list:own\", \"donation:read:own\", \"donor:create:own\", \"donor:read:own\"]));",
+                  "pm.test(\"R3b - donor.a : actor_type external et party_id metier\", () => { pm.expect(claims(t).actor_type).to.eql(\"external\"); pm.expect(claims(t).party_id).to.eql(\"8f098e43-e3c0-4143-aac7-dc0a9a7bffbd\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-customers/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code"
+                },
+                {
+                  "key": "client_id",
+                  "value": "donation-tests"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{donationTestsClientSecret}}"
+                },
+                {
+                  "key": "code",
+                  "value": "{{authCode}}"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://oauth.pstmn.io/v1/callback"
+                },
+                {
+                  "key": "code_verifier",
+                  "value": "{{pkceVerifier}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Login donor.b@example.test (myc-customers) 1/3 - page de login + PKCE",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// PKCE : code_verifier aleatoire, code_challenge = BASE64URL(SHA256(verifier))",
+                  "const cryptoJs = require(\"crypto-js\");",
+                  "const alphabet = \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\";",
+                  "let verifier = \"\";",
+                  "for (let i = 0; i < 64; i++) verifier += alphabet.charAt(Math.floor(Math.random() * alphabet.length));",
+                  "const challenge = cryptoJs.SHA256(verifier).toString(cryptoJs.enc.Base64).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\");",
+                  "pm.collectionVariables.set(\"pkceVerifier\", verifier);",
+                  "pm.collectionVariables.set(\"pkceChallenge\", challenge);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "// Keycloak pose ses cookies en Secure/SameSite=None : on les renvoie nous-memes a l'etape suivante",
+                  "const cookies = pm.response.headers.all().filter(h => h.key.toLowerCase() === \"set-cookie\").map(h => h.value.split(\";\")[0]).join(\"; \");",
+                  "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
+                  "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
+                  "pm.collectionVariables.set(\"kcCookies\", cookies);",
+                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-customers/protocol/openid-connect/auth?client_id=donation-tests&response_type=code&scope=openid%20donation%3Aread%20donation%3Awrite&redirect_uri=https%3A%2F%2Foauth.pstmn.io%2Fv1%2Fcallback&code_challenge={{pkceChallenge}}&code_challenge_method=S256&state=local"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Login donor.b@example.test (myc-customers) 2/3 - identifiants",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"redirection vers le client (302)\", () => pm.response.to.have.status(302));",
+                  "const location = pm.response.headers.get(\"Location\") || \"\";",
+                  "const code = (location.match(/[?&]code=([^&]+)/) || [])[1];",
+                  "pm.test(\"code d'autorisation recu\", () => pm.expect(code).to.be.a(\"string\"));",
+                  "pm.collectionVariables.set(\"authCode\", code);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "{{kcCookies}}"
+              }
+            ],
+            "url": "{{loginAction}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "username",
+                  "value": "donor.b@example.test"
+                },
+                {
+                  "key": "password",
+                  "value": "{{testUsersPassword}}"
+                },
+                {
+                  "key": "credentialId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false,
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Login donor.b@example.test (myc-customers) 3/3 - echange du code (PKCE)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const claims = (t) => JSON.parse(Buffer.from(t.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\"), \"base64\").toString());",
+                  "const perms = (t) => (claims(t).permissions || []).slice().sort();",
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json().access_token;",
+                  "pm.collectionVariables.set(\"donorBToken\", t);",
+                  "pm.test(\"R3d - donor.b : 5 permissions proprietaire (:own)\", () => pm.expect(perms(t)).to.have.lengthOf(5));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-customers/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code"
+                },
+                {
+                  "key": "client_id",
+                  "value": "donation-tests"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{donationTestsClientSecret}}"
+                },
+                {
+                  "key": "code",
+                  "value": "{{authCode}}"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://oauth.pstmn.io/v1/callback"
+                },
+                {
+                  "key": "code_verifier",
+                  "value": "{{pkceVerifier}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Login benef.a@example.test (myc-customers) 1/3 - page de login + PKCE",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// PKCE : code_verifier aleatoire, code_challenge = BASE64URL(SHA256(verifier))",
+                  "const cryptoJs = require(\"crypto-js\");",
+                  "const alphabet = \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\";",
+                  "let verifier = \"\";",
+                  "for (let i = 0; i < 64; i++) verifier += alphabet.charAt(Math.floor(Math.random() * alphabet.length));",
+                  "const challenge = cryptoJs.SHA256(verifier).toString(cryptoJs.enc.Base64).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\");",
+                  "pm.collectionVariables.set(\"pkceVerifier\", verifier);",
+                  "pm.collectionVariables.set(\"pkceChallenge\", challenge);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "// Keycloak pose ses cookies en Secure/SameSite=None : on les renvoie nous-memes a l'etape suivante",
+                  "const cookies = pm.response.headers.all().filter(h => h.key.toLowerCase() === \"set-cookie\").map(h => h.value.split(\";\")[0]).join(\"; \");",
+                  "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
+                  "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
+                  "pm.collectionVariables.set(\"kcCookies\", cookies);",
+                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-customers/protocol/openid-connect/auth?client_id=donation-tests&response_type=code&scope=openid%20donation%3Aread%20donation%3Awrite&redirect_uri=https%3A%2F%2Foauth.pstmn.io%2Fv1%2Fcallback&code_challenge={{pkceChallenge}}&code_challenge_method=S256&state=local"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Login benef.a@example.test (myc-customers) 2/3 - identifiants",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"redirection vers le client (302)\", () => pm.response.to.have.status(302));",
+                  "const location = pm.response.headers.get(\"Location\") || \"\";",
+                  "const code = (location.match(/[?&]code=([^&]+)/) || [])[1];",
+                  "pm.test(\"code d'autorisation recu\", () => pm.expect(code).to.be.a(\"string\"));",
+                  "pm.collectionVariables.set(\"authCode\", code);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "{{kcCookies}}"
+              }
+            ],
+            "url": "{{loginAction}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "username",
+                  "value": "benef.a@example.test"
+                },
+                {
+                  "key": "password",
+                  "value": "{{testUsersPassword}}"
+                },
+                {
+                  "key": "credentialId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false,
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Login benef.a@example.test (myc-customers) 3/3 - echange du code (PKCE)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const claims = (t) => JSON.parse(Buffer.from(t.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\"), \"base64\").toString());",
+                  "const perms = (t) => (claims(t).permissions || []).slice().sort();",
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json().access_token;",
+                  "pm.collectionVariables.set(\"benefToken\", t);",
+                  "pm.test(\"R3c - benef.a : aucune permission sur donation-api\", () => pm.expect(perms(t)).to.eql([]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-customers/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code"
+                },
+                {
+                  "key": "client_id",
+                  "value": "donation-tests"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{donationTestsClientSecret}}"
+                },
+                {
+                  "key": "code",
+                  "value": "{{authCode}}"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "https://oauth.pstmn.io/v1/callback"
+                },
+                {
+                  "key": "code_verifier",
+                  "value": "{{pkceVerifier}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - Authentification (K2)",
+      "item": [
+        {
+          "name": "A1 - GET /api/v1/donors sans token -> 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"defi WWW-Authenticate: Bearer\", () => pm.expect(pm.response.headers.get(\"WWW-Authenticate\")).to.include(\"Bearer\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/donors"
+          }
+        },
+        {
+          "name": "A2 - donation-service GET /donors -> 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{svcToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors"
+          }
+        },
+        {
+          "name": "A3 - donation-service POST /donors (pas donation:write) -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{svcToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"lastName\":\"Local\",\"firstName\":\"Test\",\"email\":\"local.{{$timestamp}}{{$randomInt}}@test.local\",\"dateOfBirth\":\"1990-01-01\",\"country\":\"MA\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "A4 - token sans scope (audience seule) -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{svcNoScopeToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors"
+          }
+        },
+        {
+          "name": "A5 - token altere (signature) -> 401",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const t = pm.collectionVariables.get(\"svcToken\");",
+                  "pm.collectionVariables.set(\"badToken\", t.substring(0, t.length - 5) + \"AAAAA\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{badToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors"
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - Matrice RBAC (K3, modele C)",
+      "item": [
+        {
+          "name": "R4 - agent POST /donors -> 201",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"donorId\", pm.response.json().donorId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"lastName\":\"Local\",\"firstName\":\"Test\",\"email\":\"local.{{$timestamp}}{{$randomInt}}@test.local\",\"dateOfBirth\":\"1990-01-01\",\"country\":\"MA\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "R5 - agent GET /donors (liste) -> 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors"
+          }
+        },
+        {
+          "name": "R6 - agent PATCH /donors/{id} -> 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors/{{donorId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"lastName\":\"Local-bis\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "R7 - agent DELETE /donors/{id} -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors/{{donorId}}"
+          }
+        },
+        {
+          "name": "R8 - agent POST /donations -> 201",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"donationId\", pm.response.json().donationId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"category\":\"FOOD\",\"type\":true,\"amount\":50,\"donor\":{\"donorId\":\"{{donorId}}\"}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "R9 - agent GET /donations/by-donor/{id} -> 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/by-donor/{{donorId}}"
+          }
+        },
+        {
+          "name": "R10 - agent PATCH /donations/{id} -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{donationId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount\":60}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "R11 - agent DELETE /donations/{id} -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{donationId}}"
+          }
+        },
+        {
+          "name": "R12 - admin PATCH /donations/{id} -> 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{donationId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount\":60}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "R13 - admin DELETE /donations/{id} -> 204",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{donationId}}"
+          }
+        },
+        {
+          "name": "R14 - admin DELETE /donors/{id} -> 204",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors/{{donorId}}"
+          }
+        },
+        {
+          "name": "R18 - superviseur GET /donors (liste) -> 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supervisorToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors"
+          }
+        },
+        {
+          "name": "R19 - benef.a GET /donations -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{benefToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations"
+          }
+        },
+        {
+          "name": "R15 - donor.a GET /donors (avant K4c) -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors"
+          }
+        },
+        {
+          "name": "R16/R17 - donor.a POST /donations (avant K4c) -> 403 problem",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"R17 - refus au format problem (type + traceId)\", () => { const b = pm.response.json(); pm.expect(b.type).to.eql(\"/problem/security/forbidden\"); pm.expect(b.traceId).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"category\":\"FOOD\",\"type\":true,\"amount\":50,\"donor\":{\"donorId\":\"{{$guid}}\"}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 - CORS",
+      "item": [
+        {
+          "name": "C1 - CORS : origine etrangere refusee",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"aucun Access-Control-Allow-Origin\", () => pm.expect(pm.response.headers.has(\"Access-Control-Allow-Origin\")).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "OPTIONS",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "https://evil.example"
+              },
+              {
+                "key": "Access-Control-Request-Method",
+                "value": "GET"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors"
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 - Console de compte Keycloak",
+      "item": [
+        {
+          "name": "Compte agent.casa (myc-internal) 1/4 - page de login + PKCE",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// PKCE : code_verifier aleatoire, code_challenge = BASE64URL(SHA256(verifier))",
+                  "const cryptoJs = require(\"crypto-js\");",
+                  "const alphabet = \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\";",
+                  "let verifier = \"\";",
+                  "for (let i = 0; i < 64; i++) verifier += alphabet.charAt(Math.floor(Math.random() * alphabet.length));",
+                  "const challenge = cryptoJs.SHA256(verifier).toString(cryptoJs.enc.Base64).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\");",
+                  "pm.collectionVariables.set(\"pkceVerifier\", verifier);",
+                  "pm.collectionVariables.set(\"pkceChallenge\", challenge);",
+                  "pm.collectionVariables.set(\"keycloakUrlEncoded\", encodeURIComponent(pm.environment.get(\"keycloakUrl\")));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "// Keycloak pose ses cookies en Secure/SameSite=None : on les renvoie nous-memes a l'etape suivante",
+                  "const cookies = pm.response.headers.all().filter(h => h.key.toLowerCase() === \"set-cookie\").map(h => h.value.split(\";\")[0]).join(\"; \");",
+                  "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
+                  "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
+                  "pm.collectionVariables.set(\"kcCookies\", cookies);",
+                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-internal/protocol/openid-connect/auth?client_id=account-console&response_type=code&scope=openid&redirect_uri={{keycloakUrlEncoded}}%2Frealms%2Fmyc-internal%2Faccount%2F&code_challenge={{pkceChallenge}}&code_challenge_method=S256"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Compte agent.casa (myc-internal) 2/4 - identifiants",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"redirection vers le client (302)\", () => pm.response.to.have.status(302));",
+                  "const location = pm.response.headers.get(\"Location\") || \"\";",
+                  "const code = (location.match(/[?&]code=([^&]+)/) || [])[1];",
+                  "pm.test(\"code d'autorisation recu\", () => pm.expect(code).to.be.a(\"string\"));",
+                  "pm.collectionVariables.set(\"authCode\", code);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "{{kcCookies}}"
+              }
+            ],
+            "url": "{{loginAction}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "username",
+                  "value": "agent.casa"
+                },
+                {
+                  "key": "password",
+                  "value": "{{testUsersPassword}}"
+                },
+                {
+                  "key": "credentialId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false,
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Compte agent.casa (myc-internal) 3/4 - echange du code (client public)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"accountToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-internal/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code"
+                },
+                {
+                  "key": "client_id",
+                  "value": "account-console"
+                },
+                {
+                  "key": "code",
+                  "value": "{{authCode}}"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "{{keycloakUrl}}/realms/myc-internal/account/"
+                },
+                {
+                  "key": "code_verifier",
+                  "value": "{{pkceVerifier}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "M7 - agent.casa (myc-internal) 4/4 - API de compte : 200 et party_id invisible",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"party_id invisible pour l'utilisateur\", () => pm.expect(pm.response.json().userProfileMetadata.attributes.map(a => a.name)).to.not.include(\"party_id\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accountToken}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{keycloakUrl}}/realms/myc-internal/account/?userProfileMetadata=true"
+          }
+        },
+        {
+          "name": "Compte donor.a@example.test (myc-customers) 1/4 - page de login + PKCE",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// PKCE : code_verifier aleatoire, code_challenge = BASE64URL(SHA256(verifier))",
+                  "const cryptoJs = require(\"crypto-js\");",
+                  "const alphabet = \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\";",
+                  "let verifier = \"\";",
+                  "for (let i = 0; i < 64; i++) verifier += alphabet.charAt(Math.floor(Math.random() * alphabet.length));",
+                  "const challenge = cryptoJs.SHA256(verifier).toString(cryptoJs.enc.Base64).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\");",
+                  "pm.collectionVariables.set(\"pkceVerifier\", verifier);",
+                  "pm.collectionVariables.set(\"pkceChallenge\", challenge);",
+                  "pm.collectionVariables.set(\"keycloakUrlEncoded\", encodeURIComponent(pm.environment.get(\"keycloakUrl\")));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "// Keycloak pose ses cookies en Secure/SameSite=None : on les renvoie nous-memes a l'etape suivante",
+                  "const cookies = pm.response.headers.all().filter(h => h.key.toLowerCase() === \"set-cookie\").map(h => h.value.split(\";\")[0]).join(\"; \");",
+                  "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
+                  "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
+                  "pm.collectionVariables.set(\"kcCookies\", cookies);",
+                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-customers/protocol/openid-connect/auth?client_id=account-console&response_type=code&scope=openid&redirect_uri={{keycloakUrlEncoded}}%2Frealms%2Fmyc-customers%2Faccount%2F&code_challenge={{pkceChallenge}}&code_challenge_method=S256"
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Compte donor.a@example.test (myc-customers) 2/4 - identifiants",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"redirection vers le client (302)\", () => pm.response.to.have.status(302));",
+                  "const location = pm.response.headers.get(\"Location\") || \"\";",
+                  "const code = (location.match(/[?&]code=([^&]+)/) || [])[1];",
+                  "pm.test(\"code d'autorisation recu\", () => pm.expect(code).to.be.a(\"string\"));",
+                  "pm.collectionVariables.set(\"authCode\", code);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "{{kcCookies}}"
+              }
+            ],
+            "url": "{{loginAction}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "username",
+                  "value": "donor.a@example.test"
+                },
+                {
+                  "key": "password",
+                  "value": "{{testUsersPassword}}"
+                },
+                {
+                  "key": "credentialId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false,
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Compte donor.a@example.test (myc-customers) 3/4 - echange du code (client public)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"accountToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-customers/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code"
+                },
+                {
+                  "key": "client_id",
+                  "value": "account-console"
+                },
+                {
+                  "key": "code",
+                  "value": "{{authCode}}"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "{{keycloakUrl}}/realms/myc-customers/account/"
+                },
+                {
+                  "key": "code_verifier",
+                  "value": "{{pkceVerifier}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "M7 - donor.a@example.test (myc-customers) 4/4 - API de compte : 200 et party_id invisible",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"party_id invisible pour l'utilisateur\", () => pm.expect(pm.response.json().userProfileMetadata.attributes.map(a => a.name)).to.not.include(\"party_id\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accountToken}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{keycloakUrl}}/realms/myc-customers/account/?userProfileMetadata=true"
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 - ABAC donateur (K4c)",
+      "item": [
+        {
+          "name": "C1 - donor.a POST /donors/me -> 201 (409 si relance)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"profil cree (201) ou deja existant (409)\", () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"lastName\":\"A\",\"firstName\":\"Donor\",\"dateOfBirth\":\"1990-01-01\",\"country\":\"MA\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "C2 - donor.a GET /donors/me -> donorId = party_id, email du token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"donorId = party_id du token\", () => pm.expect(pm.response.json().donorId).to.eql(\"8f098e43-e3c0-4143-aac7-dc0a9a7bffbd\"));",
+                  "pm.test(\"email = email verifie du compte\", () => pm.expect(pm.response.json().email).to.eql(\"donor.a@example.test\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors/me"
+          }
+        },
+        {
+          "name": "C3 - donor.a POST /donations/me -> 201",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"myDonationId\", pm.response.json().donationId);",
+                  "pm.test(\"don rattache a donor.a\", () => pm.expect(pm.response.json().donorId).to.eql(\"8f098e43-e3c0-4143-aac7-dc0a9a7bffbd\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"category\":\"EDUCATION\",\"type\":true,\"amount\":80}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "C4 - donor.a GET /donations/me -> liste contenant le don",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"liste de mes dons contient le nouveau don\", () => pm.expect(pm.response.json().map(d => d.donationId)).to.include(pm.collectionVariables.get(\"myDonationId\")));",
+                  "pm.test(\"uniquement mes dons\", () => pm.response.json().forEach(d => pm.expect(d.donorId).to.eql(\"8f098e43-e3c0-4143-aac7-dc0a9a7bffbd\")));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/me"
+          }
+        },
+        {
+          "name": "C5 - donor.a GET /donations/me/{id} -> 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/me/{{myDonationId}}"
+          }
+        },
+        {
+          "name": "C6 - donor.b GET /donations/me/{id de donor.a} -> 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorBToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/me/{{myDonationId}}"
+          }
+        },
+        {
+          "name": "C7 - donor.b GET /donors/me (sans profil) -> 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorBToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors/me"
+          }
+        },
+        {
+          "name": "C8 - donor.b POST /donations/me (sans profil) -> 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorBToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"category\":\"FOOD\",\"type\":true,\"amount\":10}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "C9 - donor.a GET /donations (liste globale) -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations"
+          }
+        },
+        {
+          "name": "C10 - agent GET /donations/by-donor/{party_id de donor.a} -> voit le don",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"l'agent voit le don de donor.a\", () => pm.expect(pm.response.json().map(d => d.donationId)).to.include(pm.collectionVariables.get(\"myDonationId\")));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/by-donor/8f098e43-e3c0-4143-aac7-dc0a9a7bffbd"
+          }
+        },
+        {
+          "name": "C11 - agent GET /donors/me (pas de permission :own) -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors/me"
+          }
+        },
+        {
+          "name": "C12 - benef.a POST /donors/me -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{benefToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"lastName\":\"A\",\"firstName\":\"Benef\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 - Audit (K4d)",
+      "item": [
+        {
+          "name": "A1 - token agent.casa : team_id et preferred_username (contrat de claims)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const claims = (t) => JSON.parse(Buffer.from(t.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\"), \"base64\").toString());",
+                  "const perms = (t) => (claims(t).permissions || []).slice().sort();",
+                  "const c = claims(pm.collectionVariables.get(\"agentToken\"));",
+                  "pm.test(\"team_id = casablanca (attribut du groupe agents/casablanca)\", () => pm.expect(c.team_id).to.eql(\"casablanca\"));",
+                  "pm.test(\"preferred_username = agent.casa\", () => pm.expect(c.preferred_username).to.eql(\"agent.casa\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/management/health"
+          }
+        },
+        {
+          "name": "A2 - token admin.test : preferred_username, pas de team_id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const claims = (t) => JSON.parse(Buffer.from(t.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\"), \"base64\").toString());",
+                  "const perms = (t) => (claims(t).permissions || []).slice().sort();",
+                  "const c = claims(pm.collectionVariables.get(\"adminToken\"));",
+                  "pm.test(\"preferred_username = admin.test\", () => pm.expect(c.preferred_username).to.eql(\"admin.test\"));",
+                  "pm.test(\"pas de team_id pour un admin\", () => pm.expect(c).to.not.have.property(\"team_id\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/management/health"
+          }
+        },
+        {
+          "name": "A3 - admin POST /donations (don de donor.a) -> 201, non audite",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"auditDonationId\", pm.response.json().donationId);",
+                  "console.log(\"auditDonationId = \" + pm.response.json().donationId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"category\":\"FOOD\",\"type\":true,\"amount\":50,\"donor\":{\"donorId\":\"8f098e43-e3c0-4143-aac7-dc0a9a7bffbd\"}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "A4 - admin PATCH /donations/{id} (amount, category) -> 200, audite DonationUpdated",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{auditDonationId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount\":120,\"category\":\"HEALTH\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "A5 - agent PATCH /donations/{id} -> 403, non audite",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{auditDonationId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount\":999}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "A6 - superviseur DELETE /donations/{id} -> 403, non audite",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supervisorToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{auditDonationId}}"
+          }
+        },
+        {
+          "name": "A7 - admin DELETE /donations/{id} -> 204, audite DonationDeleted",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{auditDonationId}}"
+          }
+        },
+        {
+          "name": "A8 - admin PATCH /donations/{id} supprime -> 404, non audite (rollback)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{auditDonationId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount\":130}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "Attendu en base pour auditDonationId (affiche dans la console Postman) : exactement 2 lignes audit_outbox, DonationUpdated (changes amount 50.00 -> 120.00, category FOOD -> HEALTH) puis DonationDeleted (snapshot), auteur admin.test. Aucune ligne pour A3, A5, A6, A8."
+    },
+    {
+      "name": "09 - Parcours de bout en bout (donateur, agent, admin)",
+      "item": [
+        {
+          "name": "P1 - donor.a : profil (cree ou deja existant)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"profil cree (201) ou deja existant (409)\", () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"lastName\":\"A\",\"firstName\":\"Donor\",\"dateOfBirth\":\"1990-01-01\",\"country\":\"MA\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "P2 - donor.a cree un don de 75 (EDUCATION)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"e2eDonationId\", pm.response.json().donationId);",
+                  "console.log(\"e2eDonationId = \" + pm.response.json().donationId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"category\":\"EDUCATION\",\"type\":false,\"amount\":75}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "P3 - agent.casa retrouve le don par donateur",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"le don de donor.a est visible par l'agent\", () => pm.expect(pm.response.json().map(d => d.donationId)).to.include(pm.collectionVariables.get(\"e2eDonationId\")));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/by-donor/8f098e43-e3c0-4143-aac7-dc0a9a7bffbd"
+          }
+        },
+        {
+          "name": "P4 - agent.casa ne peut pas corriger le montant (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{e2eDonationId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount\":90}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "P5 - admin.test corrige le montant (75 -> 90, audite)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"montant corrige\", () => pm.expect(Number(pm.response.json().amount)).to.eql(90));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{e2eDonationId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount\":90}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "P6 - donor.a voit le montant corrige",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"montant 90 vu par le donateur\", () => pm.expect(Number(pm.response.json().amount)).to.eql(90));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/me/{{e2eDonationId}}"
+          }
+        },
+        {
+          "name": "P7 - donor.b ne voit pas le don de donor.a (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorBToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/me/{{e2eDonationId}}"
+          }
+        },
+        {
+          "name": "P8 - admin.test supprime le don (audite)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/{{e2eDonationId}}"
+          }
+        },
+        {
+          "name": "P9 - donor.a ne trouve plus le don (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{donorToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations/me/{{e2eDonationId}}"
+          }
+        }
+      ],
+      "description": "Parcours metier complet a travers toute la chaine. Attendu en base : 2 lignes audit_outbox pour e2eDonationId (affiche dans la console) : DonationUpdated (75.00 -> 90.00) puis DonationDeleted."
+    },
+    {
+      "name": "08 - Passerelles, WAF et isolation reseau (K5, mode pile)",
+      "item": [
+        {
+          "name": "G1 - WAF : injection SQL dans un parametre -> 403",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"mode\") !== \"pile\") { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"bloque par le WAF (pas une reponse de l'API)\", () => pm.expect(pm.response.text()).to.not.include(\"/problem/\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors?id=1%27%20OR%20%271%27%3D%271"
+          }
+        },
+        {
+          "name": "G2 - WAF : XSS dans un corps JSON -> 403 (ignore : dette 16, option B)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Limite acceptee (decision K5 du 2026-10-08) : le WAF n'inspecte pas les corps.",
+                  "// A reactiver avec l'option B (WAF dedie), dette 16.",
+                  "pm.execution.skipRequest();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"bloque par le WAF (pas une reponse de l'API)\", () => pm.expect(pm.response.text()).to.not.include(\"/problem/\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"lastName\":\"<script>alert(1)</script>\",\"firstName\":\"X\",\"email\":\"xss@example.test\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "G3 - WAF : traversee de chemin -> 403",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"mode\") !== \"pile\") { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"bloque par le WAF (pas une reponse de l'API)\", () => pm.expect(pm.response.text()).to.not.include(\"/problem/\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors?file=../../etc/passwd"
+          }
+        },
+        {
+          "name": "G4 - WAF : donnees legitimes (accents, apostrophe, tiret) -> 201, pas de faux positif",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"mode\") !== \"pile\") { pm.execution.skipRequest(); }",
+                  "pm.collectionVariables.set(\"gwEmail\", \"e2e.\" + Date.now() + \"@example.test\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"gwDonorId\", pm.response.json().donorId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agentToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"lastName\":\"Ben Ali-El Idrissi\",\"firstName\":\"Élodie d'Arc\",\"email\":\"{{gwEmail}}\",\"dateOfBirth\":\"1985-05-05\",\"country\":\"MA\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "G5 - nettoyage : admin supprime le donateur de G4 -> 204",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"mode\") !== \"pile\") { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors/{{gwDonorId}}"
+          }
+        },
+        {
+          "name": "G6 - console d'administration Keycloak non exposee -> 404",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"mode\") !== \"pile\") { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/admin/master/console/"
+          }
+        },
+        {
+          "name": "G7 - realm master non expose -> 404",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"mode\") !== \"pile\") { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/master/.well-known/openid-configuration"
+          }
+        },
+        {
+          "name": "G8 - chemin hors liste blanche -> 404",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"mode\") !== \"pile\") { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/inconnu"
+          }
+        },
+        {
+          "name": "G9 - sans token -> 401 par APISIX interne",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"mode\") !== \"pile\") { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"refuse par APISIX interne, sans atteindre l'API\", () => pm.expect(pm.response.text()).to.include(\"emetteur non reconnu\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/donations"
+          }
+        },
+        {
+          "name": "G10 - token d'un emetteur inconnu -> 401 par APISIX interne",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"mode\") !== \"pile\") { pm.execution.skipRequest(); }",
+                  "// Jeton falsifie : charge utile modifiee, signature d'origine conservee",
+                  "const b64u = (s) => Buffer.from(s).toString(\"base64\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\");",
+                  "const parts = pm.collectionVariables.get(\"adminToken\").split(\".\");",
+                  "const claims = JSON.parse(Buffer.from(parts[1].replace(/-/g, \"+\").replace(/_/g, \"/\"), \"base64\").toString());",
+                  "claims.iss = \"https://idp.inconnu.example/realms/pirate\";",
+                  "pm.collectionVariables.set(\"forgedToken\", parts[0] + \".\" + b64u(JSON.stringify(claims)) + \".\" + parts[2]);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"refuse par APISIX interne, sans atteindre l'API\", () => pm.expect(pm.response.text()).to.include(\"emetteur non reconnu\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{forgedToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donations"
+          }
+        },
+        {
+          "name": "G11 - token falsifie (emetteur connu, permissions ajoutees) -> 401 (signature)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"mode\") !== \"pile\") { pm.execution.skipRequest(); }",
+                  "// Jeton falsifie : charge utile modifiee, signature d'origine conservee",
+                  "const b64u = (s) => Buffer.from(s).toString(\"base64\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\");",
+                  "const parts = pm.collectionVariables.get(\"adminToken\").split(\".\");",
+                  "const claims = JSON.parse(Buffer.from(parts[1].replace(/-/g, \"+\").replace(/_/g, \"/\"), \"base64\").toString());",
+                  "claims.scope = \"openid donation:read donation:write\";",
+                  "claims.permissions = [\"donor:delete\"];",
+                  "pm.collectionVariables.set(\"forgedToken\", parts[0] + \".\" + b64u(JSON.stringify(claims)) + \".\" + parts[2]);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{forgedToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors/00000000-0000-0000-0000-000000000000"
+          }
+        },
+        {
+          "name": "G12 - scope insuffisant (lecture seule) en ecriture -> 403 par APISIX interne",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"mode\") !== \"pile\") { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{svcToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"lastName\":\"X\",\"firstName\":\"Y\",\"email\":\"scope@example.test\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "G13 - en-tetes de securite sur une reponse de l'API",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"mode\") !== \"pile\") { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"HSTS present\", () => pm.expect(pm.response.headers.get(\"Strict-Transport-Security\")).to.match(/^max-age=\\d+/));",
+                  "pm.test(\"X-Content-Type-Options nosniff\", () => pm.expect(pm.response.headers.get(\"X-Content-Type-Options\")).to.eql(\"nosniff\"));",
+                  "pm.test(\"X-Frame-Options SAMEORIGIN\", () => pm.expect(pm.response.headers.get(\"X-Frame-Options\")).to.eql(\"SAMEORIGIN\"));",
+                  "pm.test(\"Referrer-Policy\", () => pm.expect(pm.response.headers.get(\"Referrer-Policy\")).to.eql(\"strict-origin-when-cross-origin\"));",
+                  "pm.test(\"X-Request-Id (correlation)\", () => pm.expect(pm.response.headers.get(\"X-Request-Id\")).to.match(/^[0-9a-f-]{36}$/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/donors"
+          }
+        },
+        {
+          "name": "G14 - en-tetes de securite sur une page Keycloak",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"mode\") !== \"pile\") { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"HSTS present\", () => pm.expect(pm.response.headers.get(\"Strict-Transport-Security\")).to.match(/^max-age=\\d+/));",
+                  "pm.test(\"X-Content-Type-Options nosniff\", () => pm.expect(pm.response.headers.get(\"X-Content-Type-Options\")).to.eql(\"nosniff\"));",
+                  "pm.test(\"X-Frame-Options SAMEORIGIN\", () => pm.expect(pm.response.headers.get(\"X-Frame-Options\")).to.eql(\"SAMEORIGIN\"));",
+                  "pm.test(\"Referrer-Policy\", () => pm.expect(pm.response.headers.get(\"Referrer-Policy\")).to.eql(\"strict-origin-when-cross-origin\"));",
+                  "pm.test(\"X-Request-Id (correlation)\", () => pm.expect(pm.response.headers.get(\"X-Request-Id\")).to.match(/^[0-9a-f-]{36}$/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/myc-customers/.well-known/openid-configuration"
+          }
+        }
+      ],
+      "description": "Mode pile uniquement (ignore en mode dev). Isolation reseau et limitation de debit : controles PowerShell du plan de test (Postman ne genere pas assez de charge)."
+    }
+  ],
+  "variable": [
+    {
+      "key": "svcToken",
+      "value": ""
+    },
+    {
+      "key": "svcNoScopeToken",
+      "value": ""
+    },
+    {
+      "key": "badToken",
+      "value": ""
+    },
+    {
+      "key": "adminToken",
+      "value": ""
+    },
+    {
+      "key": "agentToken",
+      "value": ""
+    },
+    {
+      "key": "supervisorToken",
+      "value": ""
+    },
+    {
+      "key": "donorToken",
+      "value": ""
+    },
+    {
+      "key": "donorBToken",
+      "value": ""
+    },
+    {
+      "key": "benefToken",
+      "value": ""
+    },
+    {
+      "key": "myDonationId",
+      "value": ""
+    },
+    {
+      "key": "auditDonationId",
+      "value": ""
+    },
+    {
+      "key": "accountToken",
+      "value": ""
+    },
+    {
+      "key": "keycloakUrlEncoded",
+      "value": ""
+    },
+    {
+      "key": "pkceVerifier",
+      "value": ""
+    },
+    {
+      "key": "pkceChallenge",
+      "value": ""
+    },
+    {
+      "key": "kcCookies",
+      "value": ""
+    },
+    {
+      "key": "loginAction",
+      "value": ""
+    },
+    {
+      "key": "authCode",
+      "value": ""
+    },
+    {
+      "key": "donorId",
+      "value": ""
+    },
+    {
+      "key": "donationId",
+      "value": ""
+    },
+    {
+      "key": "e2eDonationId",
+      "value": ""
+    },
+    {
+      "key": "gwDonorId",
+      "value": ""
+    },
+    {
+      "key": "gwEmail",
+      "value": ""
+    },
+    {
+      "key": "forgedToken",
+      "value": ""
+    }
+  ]
+}
