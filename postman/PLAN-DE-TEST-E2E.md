@@ -119,7 +119,7 @@ end
 for i = 1, 120 do local _, s = ngx.thread.wait(t[i]); codes[s] = (codes[s] or 0) + 1 end
 for k, v in pairs(codes) do print("HTTP ", k, " : ", v) end
 '@
-$lua | docker compose exec -T apisix-int sh -c 'cd /usr/local/apisix && resty -c 512 -I deps/share/lua/5.1 -e "$(cat)"'
+$lua | docker compose exec -T apisix-int sh -c 'cd /usr/local/apisix && resty -c 512 -I deps/share/lua/5.1 /dev/stdin'
 ```
 
 Attendu : environ 60 a 70 `HTTP 200` (20 req/s + rafale de 40) et le reste en `HTTP 429`.
