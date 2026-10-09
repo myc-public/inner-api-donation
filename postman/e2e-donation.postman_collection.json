@@ -101,7 +101,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"issuer = myc-internal\", () => pm.expect(pm.response.json().issuer).to.eql(pm.environment.get(\"keycloakUrl\") + \"/realms/myc-internal\"));"
+                  "pm.test(\"issuer = myc-internal\", () => pm.expect(pm.response.json().issuer).to.eql((pm.environment.get(\"issuerUrl\") || pm.environment.get(\"keycloakUrl\")) + \"/realms/myc-internal\"));"
                 ]
               }
             }
@@ -121,7 +121,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"statut 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"issuer = myc-customers\", () => pm.expect(pm.response.json().issuer).to.eql(pm.environment.get(\"keycloakUrl\") + \"/realms/myc-customers\"));"
+                  "pm.test(\"issuer = myc-customers\", () => pm.expect(pm.response.json().issuer).to.eql((pm.environment.get(\"issuerUrl\") || pm.environment.get(\"keycloakUrl\")) + \"/realms/myc-customers\"));"
                 ]
               }
             }
@@ -251,7 +251,12 @@
                   "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
                   "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
                   "pm.collectionVariables.set(\"kcCookies\", cookies);",
-                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                  "// Mode sandbox (avant APISIX externe) : le formulaire pointe vers l'URL publique (issuerUrl), pas encore exposee ;",
+                  "// on l'appelle par keycloakUrl (port-forward). issuerUrl vide (modes dev et pile) : aucun changement.",
+                  "const issuerUrl = pm.environment.get(\"issuerUrl\");",
+                  "let action = m[1].replace(/&amp;/g, \"&\");",
+                  "if (issuerUrl && action.startsWith(issuerUrl)) action = pm.environment.get(\"keycloakUrl\") + action.substring(issuerUrl.length);",
+                  "pm.collectionVariables.set(\"loginAction\", action);"
                 ]
               }
             }
@@ -398,7 +403,12 @@
                   "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
                   "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
                   "pm.collectionVariables.set(\"kcCookies\", cookies);",
-                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                  "// Mode sandbox (avant APISIX externe) : le formulaire pointe vers l'URL publique (issuerUrl), pas encore exposee ;",
+                  "// on l'appelle par keycloakUrl (port-forward). issuerUrl vide (modes dev et pile) : aucun changement.",
+                  "const issuerUrl = pm.environment.get(\"issuerUrl\");",
+                  "let action = m[1].replace(/&amp;/g, \"&\");",
+                  "if (issuerUrl && action.startsWith(issuerUrl)) action = pm.environment.get(\"keycloakUrl\") + action.substring(issuerUrl.length);",
+                  "pm.collectionVariables.set(\"loginAction\", action);"
                 ]
               }
             }
@@ -544,7 +554,12 @@
                   "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
                   "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
                   "pm.collectionVariables.set(\"kcCookies\", cookies);",
-                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                  "// Mode sandbox (avant APISIX externe) : le formulaire pointe vers l'URL publique (issuerUrl), pas encore exposee ;",
+                  "// on l'appelle par keycloakUrl (port-forward). issuerUrl vide (modes dev et pile) : aucun changement.",
+                  "const issuerUrl = pm.environment.get(\"issuerUrl\");",
+                  "let action = m[1].replace(/&amp;/g, \"&\");",
+                  "if (issuerUrl && action.startsWith(issuerUrl)) action = pm.environment.get(\"keycloakUrl\") + action.substring(issuerUrl.length);",
+                  "pm.collectionVariables.set(\"loginAction\", action);"
                 ]
               }
             }
@@ -690,7 +705,12 @@
                   "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
                   "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
                   "pm.collectionVariables.set(\"kcCookies\", cookies);",
-                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                  "// Mode sandbox (avant APISIX externe) : le formulaire pointe vers l'URL publique (issuerUrl), pas encore exposee ;",
+                  "// on l'appelle par keycloakUrl (port-forward). issuerUrl vide (modes dev et pile) : aucun changement.",
+                  "const issuerUrl = pm.environment.get(\"issuerUrl\");",
+                  "let action = m[1].replace(/&amp;/g, \"&\");",
+                  "if (issuerUrl && action.startsWith(issuerUrl)) action = pm.environment.get(\"keycloakUrl\") + action.substring(issuerUrl.length);",
+                  "pm.collectionVariables.set(\"loginAction\", action);"
                 ]
               }
             }
@@ -837,7 +857,12 @@
                   "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
                   "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
                   "pm.collectionVariables.set(\"kcCookies\", cookies);",
-                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                  "// Mode sandbox (avant APISIX externe) : le formulaire pointe vers l'URL publique (issuerUrl), pas encore exposee ;",
+                  "// on l'appelle par keycloakUrl (port-forward). issuerUrl vide (modes dev et pile) : aucun changement.",
+                  "const issuerUrl = pm.environment.get(\"issuerUrl\");",
+                  "let action = m[1].replace(/&amp;/g, \"&\");",
+                  "if (issuerUrl && action.startsWith(issuerUrl)) action = pm.environment.get(\"keycloakUrl\") + action.substring(issuerUrl.length);",
+                  "pm.collectionVariables.set(\"loginAction\", action);"
                 ]
               }
             }
@@ -983,7 +1008,12 @@
                   "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
                   "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
                   "pm.collectionVariables.set(\"kcCookies\", cookies);",
-                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                  "// Mode sandbox (avant APISIX externe) : le formulaire pointe vers l'URL publique (issuerUrl), pas encore exposee ;",
+                  "// on l'appelle par keycloakUrl (port-forward). issuerUrl vide (modes dev et pile) : aucun changement.",
+                  "const issuerUrl = pm.environment.get(\"issuerUrl\");",
+                  "let action = m[1].replace(/&amp;/g, \"&\");",
+                  "if (issuerUrl && action.startsWith(issuerUrl)) action = pm.environment.get(\"keycloakUrl\") + action.substring(issuerUrl.length);",
+                  "pm.collectionVariables.set(\"loginAction\", action);"
                 ]
               }
             }
@@ -1743,7 +1773,9 @@
                   "const challenge = cryptoJs.SHA256(verifier).toString(cryptoJs.enc.Base64).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\");",
                   "pm.collectionVariables.set(\"pkceVerifier\", verifier);",
                   "pm.collectionVariables.set(\"pkceChallenge\", challenge);",
-                  "pm.collectionVariables.set(\"keycloakUrlEncoded\", encodeURIComponent(pm.environment.get(\"keycloakUrl\")));"
+                  "// redirect_uri de la console de compte = URL publique de Keycloak (issuerUrl si renseignee)",
+                  "pm.collectionVariables.set(\"kcFrontUrl\", pm.environment.get(\"issuerUrl\") || pm.environment.get(\"keycloakUrl\"));",
+                  "pm.collectionVariables.set(\"keycloakUrlEncoded\", encodeURIComponent(pm.collectionVariables.get(\"kcFrontUrl\")));"
                 ]
               }
             },
@@ -1758,7 +1790,12 @@
                   "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
                   "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
                   "pm.collectionVariables.set(\"kcCookies\", cookies);",
-                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                  "// Mode sandbox (avant APISIX externe) : le formulaire pointe vers l'URL publique (issuerUrl), pas encore exposee ;",
+                  "// on l'appelle par keycloakUrl (port-forward). issuerUrl vide (modes dev et pile) : aucun changement.",
+                  "const issuerUrl = pm.environment.get(\"issuerUrl\");",
+                  "let action = m[1].replace(/&amp;/g, \"&\");",
+                  "if (issuerUrl && action.startsWith(issuerUrl)) action = pm.environment.get(\"keycloakUrl\") + action.substring(issuerUrl.length);",
+                  "pm.collectionVariables.set(\"loginAction\", action);"
                 ]
               }
             }
@@ -1856,7 +1893,7 @@
                 },
                 {
                   "key": "redirect_uri",
-                  "value": "{{keycloakUrl}}/realms/myc-internal/account/"
+                  "value": "{{kcFrontUrl}}/realms/myc-internal/account/"
                 },
                 {
                   "key": "code_verifier",
@@ -1911,7 +1948,9 @@
                   "const challenge = cryptoJs.SHA256(verifier).toString(cryptoJs.enc.Base64).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\");",
                   "pm.collectionVariables.set(\"pkceVerifier\", verifier);",
                   "pm.collectionVariables.set(\"pkceChallenge\", challenge);",
-                  "pm.collectionVariables.set(\"keycloakUrlEncoded\", encodeURIComponent(pm.environment.get(\"keycloakUrl\")));"
+                  "// redirect_uri de la console de compte = URL publique de Keycloak (issuerUrl si renseignee)",
+                  "pm.collectionVariables.set(\"kcFrontUrl\", pm.environment.get(\"issuerUrl\") || pm.environment.get(\"keycloakUrl\"));",
+                  "pm.collectionVariables.set(\"keycloakUrlEncoded\", encodeURIComponent(pm.collectionVariables.get(\"kcFrontUrl\")));"
                 ]
               }
             },
@@ -1926,7 +1965,12 @@
                   "const m = pm.response.text().match(/action=\"([^\"]*login-actions\\/authenticate[^\"]*)\"/);",
                   "pm.test(\"formulaire de login trouve\", () => pm.expect(m).to.not.be.null);",
                   "pm.collectionVariables.set(\"kcCookies\", cookies);",
-                  "pm.collectionVariables.set(\"loginAction\", m[1].replace(/&amp;/g, \"&\"));"
+                  "// Mode sandbox (avant APISIX externe) : le formulaire pointe vers l'URL publique (issuerUrl), pas encore exposee ;",
+                  "// on l'appelle par keycloakUrl (port-forward). issuerUrl vide (modes dev et pile) : aucun changement.",
+                  "const issuerUrl = pm.environment.get(\"issuerUrl\");",
+                  "let action = m[1].replace(/&amp;/g, \"&\");",
+                  "if (issuerUrl && action.startsWith(issuerUrl)) action = pm.environment.get(\"keycloakUrl\") + action.substring(issuerUrl.length);",
+                  "pm.collectionVariables.set(\"loginAction\", action);"
                 ]
               }
             }
@@ -2024,7 +2068,7 @@
                 },
                 {
                   "key": "redirect_uri",
-                  "value": "{{keycloakUrl}}/realms/myc-customers/account/"
+                  "value": "{{kcFrontUrl}}/realms/myc-customers/account/"
                 },
                 {
                   "key": "code_verifier",
@@ -3556,6 +3600,10 @@
     },
     {
       "key": "forgedToken",
+      "value": ""
+    },
+    {
+      "key": "kcFrontUrl",
       "value": ""
     }
   ]

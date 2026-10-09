@@ -15,7 +15,7 @@ et resiste aux abus :
 | K4d | Audit : toute modification / suppression d'une donation produit une ligne `audit_outbox` |
 | K5 | Passerelles : WAF, liste blanche, tokens falsifies, scopes, en-tetes, isolation reseau, limitation de debit |
 
-Hors perimetre : front + BFF (K6), contrat OpenAPI (K7), observabilite securite (K8), OpenShift.
+Hors perimetre : front + BFF (K6), contrat OpenAPI (K7), observabilite securite (K8).
 
 ## 2. Environnements
 
@@ -23,9 +23,15 @@ Hors perimetre : front + BFF (K6), contrat OpenAPI (K7), observabilite securite 
 |---|---|---|---|
 | **dev** | Postman -> API (`http://localhost:8080`) et Keycloak (`http://localhost:8180`) en direct | `e2e-dev` | Developpement : K1 a K4 |
 | **pile** | Postman -> APISIX externe (`https://localhost:8443`) -> APISIX interne -> API | `e2e-pile` | **Recette** : K1 a K5, chaine complete |
+| **sandbox** | Postman -> Route `donation-api` du Sandbox OpenShift ; Keycloak par `ocs port-forward` (`http://localhost:18080`) | `e2e-sandbox` | Non-regression K1 a K4 sur OpenShift **avant APISIX externe** (etapes O1-2 a O1-5) |
 
-Le dossier **08 (passerelles)** ne s'execute qu'en mode pile (ignore en mode dev). En mode pile, `/management/**`
+Le dossier **08 (passerelles)** ne s'execute qu'en mode pile (ignore en modes dev et sandbox). En mode pile, `/management/**`
 et `/docs/**` ne sont pas exposes (attendu : 404).
+
+Mode sandbox : l'`iss` des tokens est deja l'URL publique definitive (`issuerUrl`), pas encore exposee. La collection
+compare l'`issuer` a `issuerUrl` et envoie le formulaire de login a `keycloakUrl` (port-forward). `issuerUrl` vide
+(modes dev et pile) : comportement inchange. Apres l'etape O1-4 (APISIX externe), la recette se fait en mode pile
+sur l'URL publique.
 
 ## 3. Prerequis
 
@@ -36,10 +42,30 @@ et `/docs/**` ne sont pas exposes (attendu : 404).
   (`DONATION_SERVICE_CLIENT_SECRET`, `DONATION_TESTS_CLIENT_SECRET`, `TEST_USERS_PASSWORD`).
   Ne jamais exporter un environnement rempli dans le depot.
 - Mode pile : certificat auto-signe -> Postman, Settings > General > SSL certificate verification : OFF.
+- Mode sandbox : connecte au Sandbox (`ocs whoami`), port-forward ouvert pendant tout le passage (fenetre dediee) :
+
+  ```powershell
+  ocs port-forward svc/keycloak 18080:8080
+  ```
+
+  Secrets : lus dans les Secrets du Sandbox et copies **dans le presse-papiers sans affichage**, un par un, puis colles
+  dans la valeur courante de l'environnement `e2e-sandbox` :
+
+  ```powershell
+  function Copy-KcSecret($cle) {
+    $b64 = ocs get secret keycloak-realm-secret -o jsonpath="{.data.$cle}"
+    [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64)) | Set-Clipboard
+    "$cle copie dans le presse-papiers"
+  }
+  Copy-KcSecret DONATION_SERVICE_CLIENT_SECRET   # -> donationServiceClientSecret
+  Copy-KcSecret DONATION_TESTS_CLIENT_SECRET     # -> donationTestsClientSecret
+  Copy-KcSecret TEST_USERS_PASSWORD              # -> testUsersPassword
+  Set-Clipboard -Value " "                       # vider le presse-papiers a la fin
+  ```
 
 ## 4. Execution
 
-**Collection Runner de Postman** : collection `e2e-donation`, environnement `e2e-pile` (ou `e2e-dev`),
+**Collection Runner de Postman** : collection `e2e-donation`, environnement `e2e-pile` (ou `e2e-dev`, `e2e-sandbox`),
 toute la collection, dans l'ordre. Les tokens durent 5 minutes : relancer toute la collection plutot qu'un dossier.
 
 **Newman (optionnel)**, environnement rempli hors du depot :
@@ -87,6 +113,12 @@ SELECT event_type, aggregate_id, JSON_UNQUOTE(JSON_EXTRACT(payload, '$.actor.use
 FROM audit_outbox ORDER BY occurred_at DESC LIMIT 6;
 '@
 $sql | docker compose exec -T donation-api-mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysql -t -u "$MYSQL_USER" "$MYSQL_DATABASE"'
+```
+
+Mode sandbox : meme requete, dans le pod MySQL du Sandbox :
+
+```powershell
+$sql | ocs exec -i deploy/donation-api-mysql -- sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysql -t -u "$MYSQL_USER" "$MYSQL_DATABASE"'
 ```
 
 Attendu pour `e2eDonationId` (console Postman) : `DonationUpdated` (`75.00` -> `90.00`) puis `DonationDeleted`,
