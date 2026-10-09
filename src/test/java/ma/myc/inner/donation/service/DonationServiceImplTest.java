@@ -1,9 +1,12 @@
 package ma.myc.inner.donation.service;
 
+import ma.myc.inner.donation.audit.AuditRecorder;
+import ma.myc.inner.donation.audit.DonationState;
 import ma.myc.inner.donation.domain.bo.DonationBO;
 import ma.myc.inner.donation.domain.bo.DonationCategory;
 import ma.myc.inner.donation.domain.bo.DonorBO;
 import ma.myc.inner.donation.domain.dto.CreateDonationRequest;
+import ma.myc.inner.donation.domain.dto.CreateMyDonationRequest;
 import ma.myc.inner.donation.domain.dto.DonationResponse;
 import ma.myc.inner.donation.domain.dto.DonorSnapshot;
 import ma.myc.inner.donation.domain.dto.UpdateDonationRequest;
@@ -15,6 +18,7 @@ import ma.myc.inner.donation.outbox.OutboxEventBO;
 import ma.myc.inner.donation.outbox.OutboxEventRepository;
 import ma.myc.inner.donation.outbox.OutboxFactory;
 import ma.myc.inner.donation.repository.DonationRepository;
+import ma.myc.inner.donation.exception.DonorProfileRequiredException;
 import ma.myc.inner.donation.exception.NotFoundException;
 import ma.myc.inner.donation.repository.DonorRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,21 +48,21 @@ class DonationServiceImplTest {
     @Mock private DonationEventMapper donationEventMapper;
     @Mock private OutboxFactory outboxFactory;
     @Mock private OutboxEventRepository outboxEventRepository;
+    @Mock private AuditRecorder auditRecorder;
 
     private DonationServiceImpl donationService;
 
     private static final UUID DONATION_ID = UUID.randomUUID();
     private static final UUID DONOR_ID = UUID.randomUUID();
     private static final Instant NOW = Instant.now();
-    private static final String TOPIC = "donation-event";
     private static final String PRODUCER = "donation-service";
 
     @BeforeEach
     void setUp() {
         donationService = new DonationServiceImpl(
                 donationRepository, donorRepository, donationMapper,
-                donationEventMapper, outboxFactory, outboxEventRepository,
-                TOPIC, PRODUCER
+                donationEventMapper, outboxFactory, outboxEventRepository, auditRecorder,
+                PRODUCER
         );
     }
 
@@ -97,7 +101,7 @@ class DonationServiceImplTest {
         when(donationRepository.save(donation)).thenReturn(donation);
         when(donationEventMapper.toDonationCreatedEnvelope(donation,
                 new DonorSnapshot(DONOR_ID, DB_DATE_OF_BIRTH, DB_COUNTRY), PRODUCER)).thenReturn(envelope);
-        when(outboxFactory.newEvent(TOPIC, DONATION_ID.toString(), envelope)).thenReturn(outboxEvent);
+        when(outboxFactory.newEvent(envelope)).thenReturn(outboxEvent);
         when(donationMapper.toResponse(donation)).thenReturn(response);
         return outboxEvent;
     }
@@ -112,6 +116,8 @@ class DonationServiceImplTest {
 
         assertThat(donationService.create(request)).isEqualTo(expected);
         verify(outboxEventRepository).save(outboxEvent);
+        // Hors perimetre de l'audit (DA1) : seules la modification et la suppression sont auditees
+        verifyNoInteractions(auditRecorder);
     }
 
     @Test
@@ -228,18 +234,28 @@ class DonationServiceImplTest {
     // ─── update ───────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("update: patches donation and returns updated response")
+    @DisplayName("update: patches donation and audits the state before and after the PATCH")
     void update_success() {
         DonationBO donation = buildDonationBO();
         var request = new UpdateDonationRequest(DonationCategory.FOOD, true, new BigDecimal("200.00"));
         DonationResponse expected = buildDonationResponse();
 
+        DonationState before = DonationState.of(donation);
         when(donationRepository.findById(DONATION_ID)).thenReturn(Optional.of(donation));
+        // Le vrai mapper modifie l'entite en place : l'audit doit avoir pris l'etat AVANT
+        doAnswer(inv -> {
+            donation.setCategory(DonationCategory.FOOD);
+            donation.setType(true);
+            donation.setAmount(new BigDecimal("200.00"));
+            return null;
+        }).when(donationMapper).patch(donation, request);
         when(donationRepository.save(donation)).thenReturn(donation);
         when(donationMapper.toResponse(donation)).thenReturn(expected);
 
         assertThat(donationService.update(DONATION_ID, request)).isEqualTo(expected);
         verify(donationMapper).patch(donation, request);
+        verify(auditRecorder).donationUpdated(DONATION_ID, DONOR_ID, before, DonationState.of(donation));
+        assertThat(before.category()).isEqualTo(DonationCategory.HEALTH);
     }
 
     @Test
@@ -250,12 +266,13 @@ class DonationServiceImplTest {
 
         assertThatThrownBy(() -> donationService.update(DONATION_ID, request))
                 .isInstanceOf(NotFoundException.class);
+        verifyNoInteractions(auditRecorder);
     }
 
     // ─── delete ───────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("delete: deletes donation when found")
+    @DisplayName("delete: deletes donation when found and audits its last state")
     void delete_success() {
         DonationBO donation = buildDonationBO();
         when(donationRepository.findById(DONATION_ID)).thenReturn(Optional.of(donation));
@@ -263,6 +280,7 @@ class DonationServiceImplTest {
         donationService.delete(DONATION_ID);
 
         verify(donationRepository).delete(donation);
+        verify(auditRecorder).donationDeleted(DONATION_ID, DONOR_ID, DonationState.of(donation));
     }
 
     @Test
@@ -272,5 +290,32 @@ class DonationServiceImplTest {
 
         assertThatThrownBy(() -> donationService.delete(DONATION_ID))
                 .isInstanceOf(NotFoundException.class);
+        verifyNoInteractions(auditRecorder);
+    }
+
+    // ─── libre-service du donateur (K4c) ──────────────────────────────────────
+
+    @Test
+    @DisplayName("createForDonor: without a donor profile, 409 and nothing is written")
+    void createForDonor_noProfile_conflict() {
+        UUID partyId = UUID.randomUUID();
+        when(donorRepository.existsById(partyId)).thenReturn(false);
+
+        assertThatThrownBy(() -> donationService.createForDonor(partyId,
+                new CreateMyDonationRequest(DonationCategory.FOOD, true, new BigDecimal("50"))))
+                .isInstanceOf(DonorProfileRequiredException.class);
+        verifyNoInteractions(donationRepository, outboxEventRepository);
+    }
+
+    @Test
+    @DisplayName("getForDonor: a donation of another donor (or unknown) is not found")
+    void getForDonor_notOwned_notFound() {
+        UUID donationId = UUID.randomUUID();
+        UUID partyId = UUID.randomUUID();
+        when(donationRepository.findByIdAndDonorId(donationId, partyId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> donationService.getForDonor(donationId, partyId))
+                .isInstanceOf(NotFoundException.class);
+        verify(donationRepository, never()).findById(any());
     }
 }

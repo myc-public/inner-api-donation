@@ -1,6 +1,7 @@
 package ma.myc.inner.donation.config;
 
 import ma.myc.inner.donation.exception.DonorAlreadyExistsException;
+import ma.myc.inner.donation.exception.DonorProfileRequiredException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -344,9 +345,9 @@ public class ErrorHandlingAdvice {
 				.build();
 	}
 
-	@ExceptionHandler(DonorAlreadyExistsException.class)
+	@ExceptionHandler({ DonorAlreadyExistsException.class, DonorProfileRequiredException.class })
 	@ResponseStatus(HttpStatus.CONFLICT)
-	ApiError onDonorAlreadyExistsException(DonorAlreadyExistsException e, final HttpServletRequest request) {
+	ApiError onDonorAlreadyExistsException(RuntimeException e, final HttpServletRequest request) {
 		logger.info("Conflict: {}", e.getMessage());
 		String traceId = requestHandler.getCorrelationId();
 		return ApiError.builder()

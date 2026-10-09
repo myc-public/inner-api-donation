@@ -8,6 +8,10 @@ import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Evenement du domaine en attente de diffusion : faits metier uniquement (agregat, type, version, contenu, date).
+ * Aucune notion de transport : le CDC decide du topic (aggregate_type) et de la cle (aggregate_id).
+ */
 @Entity
 @Table(name = "outbox_event")
 public class OutboxEventBO {
@@ -27,12 +31,6 @@ public class OutboxEventBO {
 
     @Column(name = "event_version", nullable = false, length = 20)
     private String eventVersion;
-
-    @Column(name = "topic", nullable = false, length = 200)
-    private String topic;
-
-    @Column(name = "message_key", nullable = false, length = 200)
-    private String messageKey;
 
     @Lob
     @Column(name = "payload", nullable = false, columnDefinition = "TEXT")
@@ -54,8 +52,6 @@ public class OutboxEventBO {
                          String aggregateId,
                          String eventType,
                          String eventVersion,
-                         String topic,
-                         String messageKey,
                          String payload,
                          String headers,
                          Instant occurredAt) {
@@ -64,8 +60,6 @@ public class OutboxEventBO {
         this.aggregateId = aggregateId;
         this.eventType = eventType;
         this.eventVersion = eventVersion;
-        this.topic = topic;
-        this.messageKey = messageKey;
         this.payload = payload;
         this.headers = headers;
         this.occurredAt = occurredAt;
@@ -89,14 +83,6 @@ public class OutboxEventBO {
 
     public String getEventVersion() {
         return eventVersion;
-    }
-
-    public String getTopic() {
-        return topic;
-    }
-
-    public String getMessageKey() {
-        return messageKey;
     }
 
     public String getPayload() {

@@ -15,7 +15,8 @@ import lombok.ToString;
 @ConfigurationProperties(prefix = "myc.security")
 public class MycSecurityProps {
 	private boolean enabled;
-	private String allowedOriginPattern = "*";
+	// Aucune origine par defaut : CORS ferme (cf. SecurityConfig.corsFilter)
+	private String allowedOriginPattern;
 	private List<String> whitelistPath = Collections.emptyList();
 	private MycCspProps csp = new MycCspProps();
 

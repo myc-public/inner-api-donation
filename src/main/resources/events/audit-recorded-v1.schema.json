@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://myc.ma/schemas/donation-api/audit-recorded-v1.schema.json",
+  "title": "AuditRecorded v1",
+  "description": "Evenement d'audit de donation-api (K4d) : qui a modifie ou supprime quelle donation, et quand. Payload de la table audit_outbox, publie par le CDC sur le topic audit.events, indexe par Elasticsearch (_id = eventId). Aucune donnee personnelle du donateur.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["eventId", "eventType", "eventVersion", "occurredAt", "actor", "action", "resource", "traceId"],
+  "properties": {
+    "eventId": { "type": "string", "format": "uuid", "description": "Identifiant unique, _id du document Elasticsearch" },
+    "eventType": { "enum": ["DonationUpdated", "DonationDeleted"] },
+    "eventVersion": { "const": "1" },
+    "occurredAt": { "type": "string", "format": "date-time", "description": "Instant de l'action (UTC)" },
+    "actor": {
+      "type": "object",
+      "description": "Auteur, lu dans le token ; null si le claim est absent",
+      "additionalProperties": false,
+      "required": ["partyId", "username", "actorType", "teamId", "clientId", "issuer"],
+      "properties": {
+        "partyId": { "type": ["string", "null"], "description": "party_id, absent pour un compte de service" },
+        "username": { "type": ["string", "null"], "description": "preferred_username" },
+        "actorType": { "type": ["string", "null"], "description": "internal / customer" },
+        "teamId": { "type": ["string", "null"], "description": "Equipe (agents, superviseurs), null pour un admin" },
+        "clientId": { "type": ["string", "null"], "description": "Application appelante (azp)" },
+        "issuer": { "type": ["string", "null"], "description": "Realm emetteur du token" }
+      }
+    },
+    "action": { "enum": ["donation:update", "donation:delete"] },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "donorId"],
+      "properties": {
+        "type": { "const": "donation" },
+        "id": { "type": "string", "format": "uuid" },
+        "donorId": { "type": "string", "format": "uuid", "description": "Pseudonyme (party_id du donateur)" }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "description": "Etat de la donation supprimee (DonationDeleted uniquement)",
+      "additionalProperties": false,
+      "required": ["category", "type", "amount", "timestamp"],
+      "properties": {
+        "category": { "enum": ["FOOD", "HEALTH", "EDUCATION", "ENVIRONMENT", "OTHER"] },
+        "type": { "type": "boolean" },
+        "amount": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    },
+    "changes": {
+      "type": "array",
+      "description": "Champs modifies (DonationUpdated uniquement), valeurs en texte",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "before", "after"],
+        "properties": {
+          "field": { "enum": ["category", "type", "amount", "timestamp"] },
+          "before": { "type": ["string", "null"] },
+          "after": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "traceId": { "type": ["string", "null"], "description": "Trace OpenTelemetry (Tempo)" }
+  }
+}

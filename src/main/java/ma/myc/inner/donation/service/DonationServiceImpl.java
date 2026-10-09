@@ -1,14 +1,18 @@
 package ma.myc.inner.donation.service;
 
 import jakarta.transaction.Transactional;
+import ma.myc.inner.donation.audit.AuditRecorder;
+import ma.myc.inner.donation.audit.DonationState;
 import ma.myc.inner.donation.domain.bo.DonationBO;
 import ma.myc.inner.donation.domain.bo.DonorBO;
 import ma.myc.inner.donation.domain.dto.CreateDonationRequest;
+import ma.myc.inner.donation.domain.dto.CreateMyDonationRequest;
 import ma.myc.inner.donation.domain.dto.DonationResponse;
 import ma.myc.inner.donation.domain.dto.DonorSnapshot;
 import ma.myc.inner.donation.domain.dto.UpdateDonationRequest;
 import ma.myc.inner.donation.events.DonationEventMapper;
 import ma.myc.inner.donation.mapper.DonationMapper;
+import ma.myc.inner.donation.exception.DonorProfileRequiredException;
 import ma.myc.inner.donation.exception.NotFoundException;
 import ma.myc.inner.donation.outbox.OutboxEventRepository;
 import ma.myc.inner.donation.outbox.OutboxFactory;
@@ -35,8 +39,8 @@ public class DonationServiceImpl implements DonationService {
     private final DonationEventMapper donationEventMapper;
     private final OutboxFactory outboxFactory;
     private final OutboxEventRepository outboxEventRepository;
+    private final AuditRecorder auditRecorder;
 
-    private final String donationTopic;
     private final String producerName;
 
     public DonationServiceImpl(DonationRepository donationRepository,
@@ -45,7 +49,7 @@ public class DonationServiceImpl implements DonationService {
                                DonationEventMapper donationEventMapper,
                                OutboxFactory outboxFactory,
                                OutboxEventRepository outboxEventRepository,
-                               @Value("${app.kafka.topics.donation-event:donation-event}") String donationTopic,
+                               AuditRecorder auditRecorder,
                                @Value("${spring.application.name:donation-service}") String producerName) {
         this.donationRepository = donationRepository;
         this.donorRepository = donorRepository;
@@ -53,7 +57,7 @@ public class DonationServiceImpl implements DonationService {
         this.donationEventMapper = donationEventMapper;
         this.outboxFactory = outboxFactory;
         this.outboxEventRepository = outboxEventRepository;
-        this.donationTopic = donationTopic;
+        this.auditRecorder = auditRecorder;
         this.producerName = producerName;
     }
 
@@ -77,12 +81,8 @@ public class DonationServiceImpl implements DonationService {
                 producerName
         );
 
-        // Key = donationId (ordering par donation)
-        var outbox = outboxFactory.newEvent(
-                donationTopic,
-                saved.getId().toString(),
-                envelope
-        );
+        // Faits metier seulement : le CDC route (topic) et ordonne (cle = aggregate_id = donationId)
+        var outbox = outboxFactory.newEvent(envelope);
         outboxEventRepository.save(outbox);
 
         return donationMapper.toResponse(saved);
@@ -107,17 +107,44 @@ public class DonationServiceImpl implements DonationService {
     }
 
     @Override
+    public DonationResponse createForDonor(UUID donorId, CreateMyDonationRequest request) {
+        // Le profil donateur doit exister (409 sinon, DC4) : il est cree par l'onboarding (POST /donors/me)
+        if (!donorRepository.existsById(donorId)) {
+            throw new DonorProfileRequiredException();
+        }
+        return create(new CreateDonationRequest(request.category(), request.type(), request.amount(),
+                new DonorSnapshot(donorId, null, null)));
+    }
+
+    @Override
+    public DonationResponse getForDonor(UUID donationId, UUID donorId) {
+        log.debug("Fetching own donation donationId={}", donationId);
+        // Don inexistant ou d'un autre donateur : meme 404 (DC3), aucune information sur l'existence
+        return donationRepository.findByIdAndDonorId(donationId, donorId)
+                .map(donationMapper::toResponse)
+                .orElseThrow(() -> new NotFoundException("Donation not found: " + donationId));
+    }
+
+    @Override
     public DonationResponse update(UUID donationId, UpdateDonationRequest request) {
         log.info("Updating donation donationId={}", donationId);
         DonationBO donation = findDonation(donationId);
+        // Etat AVANT le PATCH (le mapper modifie l'entite en place) : base des changes de l'audit
+        DonationState before = DonationState.of(donation);
         donationMapper.patch(donation, request);
-        return donationMapper.toResponse(donationRepository.save(donation));
+        DonationBO saved = donationRepository.save(donation);
+        // Meme transaction : audite si et seulement si la modification est commitee (K4d, DA1)
+        auditRecorder.donationUpdated(donationId, saved.getDonorId(), before, DonationState.of(saved));
+        return donationMapper.toResponse(saved);
     }
 
     @Override
     public void delete(UUID donationId) {
         log.info("Deleting donation donationId={}", donationId);
-        donationRepository.delete(findDonation(donationId));
+        DonationBO donation = findDonation(donationId);
+        donationRepository.delete(donation);
+        // La ligne disparait : l'audit garde son dernier etat (snapshot), dans la meme transaction (K4d, DA3)
+        auditRecorder.donationDeleted(donationId, donation.getDonorId(), DonationState.of(donation));
     }
 
     private DonationBO findDonation(UUID donationId) {

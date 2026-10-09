@@ -73,7 +73,8 @@ public class OpenApiConfig {
 				.authorizationUrl(openApiProps.getAuthUri())
 				.tokenUrl(openApiProps.getTokenUri())
 				.scopes(new Scopes()
-						.addString(GlobalConstants.SCOPE, ""));
+						.addString(GlobalConstants.SCOPE_DONATION_READ, "Lecture")
+						.addString(GlobalConstants.SCOPE_DONATION_WRITE, "Creation, modification, suppression"));
 	}
 
 }

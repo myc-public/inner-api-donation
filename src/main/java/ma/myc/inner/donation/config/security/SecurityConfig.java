@@ -8,7 +8,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -17,6 +16,7 @@ import org.springframework.security.config.annotation.web.configurers.FormLoginC
 import org.springframework.security.config.annotation.web.configurers.HeadersConfigurer.FrameOptionsConfig;
 import org.springframework.security.config.annotation.web.configurers.LogoutConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.server.resource.authentication.JwtIssuerAuthenticationManagerResolver;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -39,6 +39,8 @@ public class SecurityConfig {
 	public static class SecurityFilterChainConfig {
 		private final SecurityAuthEntryPoint securityAuthEntryPoint;
 		private final SecurityAccessDeniedHandler securityAccessDeniedHandler;
+		// Emetteurs de confiance (myc-internal, myc-customers) : cf. OidcIssuersConfig
+		private final JwtIssuerAuthenticationManagerResolver jwtIssuerAuthenticationManagerResolver;
 		private final MycSecurityProps securityProps;
 
 		@Order(ORDER)
@@ -69,10 +71,14 @@ public class SecurityConfig {
 			http.sessionManagement(management -> management.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 					.authorizeHttpRequests(authRequests -> authRequests
 							.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-							.requestMatchers(GlobalConstants.API_V1_PATTERN).hasAuthority(GlobalConstants.SCOPE)
+							// Le token doit porter l'audience donation-api (verifiee par le decodeur) ET le scope :
+							// Keycloak ajoute l'audience des qu'un role du client est present, meme sans scope
+							.requestMatchers(HttpMethod.GET, GlobalConstants.API_V1_PATTERN).hasAuthority(GlobalConstants.SCOPE_READ)
+							.requestMatchers(GlobalConstants.API_V1_PATTERN).hasAuthority(GlobalConstants.SCOPE_WRITE)
 							.requestMatchers(securityProps.getWhitelistPath().toArray(String[]::new)).permitAll()
 							.anyRequest().authenticated())
-					.oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults())
+					.oauth2ResourceServer(oauth2 -> oauth2
+							.authenticationManagerResolver(jwtIssuerAuthenticationManagerResolver)
 							.authenticationEntryPoint(securityAuthEntryPoint)
 							.accessDeniedHandler(securityAccessDeniedHandler))
 					.formLogin(FormLoginConfigurer::disable)
@@ -90,7 +96,10 @@ public class SecurityConfig {
 			return http.build();
 		}
 
+		// CORS ferme par defaut : l'API est appelee par le BFF (meme origine) et par des serveurs.
+		// Filtre cree uniquement si une origine est explicitement autorisee (myc.security.allowed-origin-pattern).
 		@Bean
+		@ConditionalOnProperty(prefix = "myc.security", name = "allowed-origin-pattern")
 		CorsFilter corsFilter() {
 			var source = new UrlBasedCorsConfigurationSource();
 			var config = new CorsConfiguration();
