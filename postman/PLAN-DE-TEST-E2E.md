@@ -23,15 +23,18 @@ Hors perimetre : front + BFF (K6), contrat OpenAPI (K7), observabilite securite 
 |---|---|---|---|
 | **dev** | Postman -> API (`http://localhost:8080`) et Keycloak (`http://localhost:8180`) en direct | `e2e-dev` | Developpement : K1 a K4 |
 | **pile** | Postman -> APISIX externe (`https://localhost:8443`) -> APISIX interne -> API | `e2e-pile` | **Recette** : K1 a K5, chaine complete |
-| **sandbox** | Postman -> Route `donation-api` du Sandbox OpenShift ; Keycloak par `ocs port-forward` (`http://localhost:18080`) | `e2e-sandbox` | Non-regression K1 a K4 sur OpenShift **avant APISIX externe** (etapes O1-2 a O1-5) |
+| **sandbox** | Postman -> Route `donation` du Sandbox OpenShift (TLS) -> APISIX externe -> APISIX interne -> API | `e2e-sandbox` | **Recette OpenShift** : meme chaine que la pile, `mode=pile` sur l'URL publique |
 
-Le dossier **08 (passerelles)** ne s'execute qu'en mode pile (ignore en modes dev et sandbox). En mode pile, `/management/**`
-et `/docs/**` ne sont pas exposes (attendu : 404).
+Le dossier **08 (passerelles)** ne s'execute qu'en mode pile (`e2e-pile`, `e2e-sandbox` ; ignore en mode dev).
+En mode pile, `/management/**` et `/docs/**` ne sont pas exposes (attendu : 404).
 
-Mode sandbox : l'`iss` des tokens est deja l'URL publique definitive (`issuerUrl`), pas encore exposee. La collection
-compare l'`issuer` a `issuerUrl` et envoie le formulaire de login a `keycloakUrl` (port-forward). `issuerUrl` vide
-(modes dev et pile) : comportement inchange. Apres l'etape O1-4 (APISIX externe), la recette se fait en mode pile
-sur l'URL publique.
+Variables propres a un environnement : `hstsMaxAge` (valeur HSTS exacte attendue : 0 en local, 1 an sur le Sandbox ;
+vide = presence seule), `httpBaseUrl` (entree http a rediriger vers https, G15 ; vide en local, ou il n'y en a pas).
+
+Variante **avant APISIX externe** (deploiement par etapes) : l'`iss` des tokens est deja l'URL publique, pas encore
+exposee. Mettre `mode=dev`, `baseUrl` = Route de l'API, `keycloakUrl=http://localhost:18080` (`ocs port-forward
+svc/keycloak 18080:8080`) et `issuerUrl` = URL publique : la collection compare l'`issuer` a `issuerUrl` et envoie le
+formulaire de login a `keycloakUrl`. `issuerUrl` vide : comportement inchange.
 
 ## 3. Prerequis
 
@@ -42,12 +45,7 @@ sur l'URL publique.
   (`DONATION_SERVICE_CLIENT_SECRET`, `DONATION_TESTS_CLIENT_SECRET`, `TEST_USERS_PASSWORD`).
   Ne jamais exporter un environnement rempli dans le depot.
 - Mode pile : certificat auto-signe -> Postman, Settings > General > SSL certificate verification : OFF.
-- Mode sandbox : connecte au Sandbox (`ocs whoami`), port-forward ouvert pendant tout le passage (fenetre dediee) :
-
-  ```powershell
-  ocs port-forward svc/keycloak 18080:8080
-  ```
-
+- Mode sandbox : connecte au Sandbox (`ocs whoami`) pour lire les secrets ; certificat valide (verification SSL active).
   Secrets : lus dans les Secrets du Sandbox et copies **dans le presse-papiers sans affichage**, un par un, puis colles
   dans la valeur courante de l'environnement `e2e-sandbox` :
 
@@ -81,7 +79,7 @@ Puis les controles complementaires (section 6).
 | Dossier | Cas | Attendu |
 |---|---|---|
 | 00 Sante et Keycloak | S1-S4 sonde, info, loggers, documentation | dev : 200 / 200 / 401 / 200 ; pile : 404 (non exposes) |
-| | K1a-K1b decouverte OIDC des deux realms | 200, `issuer` = `keycloakUrl` + realm |
+| | K1a-K1b decouverte OIDC des deux realms | 200, `issuer` = `keycloakUrl` (ou `issuerUrl`) + realm |
 | 01 Tokens | client credentials (`donation-service`, avec / sans scope) | 200, claims du contrat |
 | | code + PKCE : admin.test, agent.casa, superviseur.casa, donor.a, donor.b, benef.a | 302 puis 200 ; permissions, `party_id`, `actor_type` attendus par role |
 | 02 Authentification | A1 sans token / A5 token altere | 401 + `WWW-Authenticate: Bearer` |
@@ -99,7 +97,8 @@ Puis les controles complementaires (section 6).
 | | G9 sans token, G10 emetteur inconnu | 401 par APISIX interne (« emetteur non reconnu »), l'API n'est pas appelee |
 | | G11 token falsifie (scope et permissions ajoutes, signature d'origine) | 401 |
 | | G12 scope lecture seule en ecriture | 403 par APISIX interne |
-| | G13-G14 en-tetes sur l'API et sur Keycloak | HSTS, `nosniff`, `SAMEORIGIN`, `Referrer-Policy`, `X-Request-Id` |
+| | G13-G14 en-tetes sur l'API et sur Keycloak | HSTS (valeur = `hstsMaxAge` si renseignee), `nosniff`, `SAMEORIGIN`, `Referrer-Policy`, `X-Request-Id` |
+| | G15 http -> https (si `httpBaseUrl`) | 301 / 302 vers `https://` |
 
 ## 6. Controles complementaires (PowerShell)
 
@@ -156,16 +155,46 @@ $lua | docker compose exec -T apisix-int sh -c 'cd /usr/local/apisix && resty -c
 
 Attendu : environ 60 a 70 `HTTP 200` (20 req/s + rafale de 40) et le reste en `HTTP 429`.
 
+Mode sandbox : les 120 requetes partent du pod `apisix-internal` vers l'URL publique (donc par le routeur, comme un
+client Internet), puis une requete du poste (autre client) ne doit pas etre limitee. Definir `$lua` (bloc
+ci-dessus) sans lancer la commande Docker, puis :
+
+```powershell
+$lua = $lua.Replace('http://apisix-ext:9080', 'https://donation-gregorie769-dev.apps.rm3.7wse.p1.openshiftapps.com').Replace('openid-configuration")', 'openid-configuration", { ssl_verify = false })')
+$lua | ocs exec -i deploy/apisix-internal -- sh -c 'cd /usr/local/apisix && resty -c 512 -I deps/share/lua/5.1 /dev/stdin'
+curl.exe -s -o NUL -w "poste %{http_code}`n" https://donation-gregorie769-dev.apps.rm3.7wse.p1.openshiftapps.com/realms/myc-internal/.well-known/openid-configuration
+```
+
+Attendu : des `HTTP 429`, puis `poste 200` (limitation par client reel : `real-ip` derriere le routeur).
+
 **6.4 Journal du WAF (mode pile)** : chaque blocage est trace avec la regle et le `request_id`.
 
 ```powershell
 docker compose logs apisix-ext | Select-String "Coraza: Access denied" | Select-Object -Last 5
 ```
 
+Mode sandbox :
+
+```powershell
+ocs logs deploy/apisix-external --since=30m | Select-String "Coraza: Access denied" | Select-Object -Last 5
+```
+
+**6.5 Etat du deploiement (mode sandbox)** : toutes les applications synchronisees, une seule entree publique.
+
+```powershell
+k --context minikube get applications -n argocd
+ocs get pods
+ocs get routes -o custom-columns=NOM:.metadata.name,HOTE:.spec.host,TLS:.spec.tls.termination
+```
+
+Attendu : applications `Synced` / `Healthy` ; pods 1/1 (hors builds et Job termines) ; Route `donation` en `edge`,
+seule Route de la chaine (avec `grafana` et `jenkins`, hors chaine) une fois la Route `donation-api` supprimee (O1-5).
+
 ## 7. Criteres d'acceptation
 
 - Collection `e2e-donation` : toutes les assertions vertes (G2 ignore, section 8).
-- 6.1 : lignes d'audit conformes ; 6.2 : seul 8443 ouvert ; 6.3 : des 429 presents ; 6.4 : blocages traces.
+- 6.1 : lignes d'audit conformes ; 6.2 : seul 8443 ouvert (pile locale) ; 6.3 : des 429 presents (et pas pour un autre
+  client en mode sandbox) ; 6.4 : blocages traces ; 6.5 : deploiement conforme (mode sandbox).
 - Aucun secret dans le depot (environnements Postman versionnes vides, `.env` et `tls/` ignores).
 
 ## 8. Limites connues
@@ -173,5 +202,5 @@ docker compose logs apisix-ext | Select-String "Coraza: Access denied" | Select-
 | Limite | Effet | Suite |
 |---|---|---|
 | WAF Coraza dans APISIX : corps de requete non inspectes (`wasm_process_req_body` non demande par `coraza-proxy-wasm`) | Une injection dans un corps JSON ou un formulaire n'est pas bloquee a la bordure (G2) ; l'API reste protegee par la validation, les requetes parametrees et le token Limite acceptee (decision K5 du 2026-10-08, option A). Passage a un WAF dedie qui inspecte les corps (option B) apres le deploiement sur le Sandbox OpenShift : dette 16 |
-| Limitation de debit par `remote_addr` | Derriere le routeur OpenShift, toutes les requetes auraient la meme IP | `real-ip` a configurer au deploiement OpenShift |
+| Limitation de debit non testable depuis Postman | Le Runner envoie les requetes une par une (~16 req/s sous Windows) | Controle 6.3 ; test de charge en CI a prevoir (K9) |
 | Certificat auto-signe en local | Verification SSL a desactiver dans Postman | Route TLS sur OpenShift |
