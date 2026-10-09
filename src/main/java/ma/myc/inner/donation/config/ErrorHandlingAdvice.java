@@ -53,7 +53,7 @@ public class ErrorHandlingAdvice {
 	@ResponseStatus(HttpStatus.FORBIDDEN)
 	ApiError onAccessDeniedException(AccessDeniedException e, final HttpServletRequest request) {
 		String message = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-		logger.error(LOG_REQUEST, message, request.getMethod(), request.getRequestURI());
+		logger.warn(LOG_REQUEST, message, request.getMethod(), request.getRequestURI());
 		String traceId = requestHandler.getCorrelationId();
 
 		return ApiError.builder()
@@ -70,7 +70,7 @@ public class ErrorHandlingAdvice {
 	@ResponseStatus(HttpStatus.UNAUTHORIZED)
 	ApiError onAuthenticationException(AuthenticationException e, final HttpServletRequest request) {
 		String message = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-		logger.error(LOG_REQUEST, message, request.getMethod(), request.getRequestURI());
+		logger.warn(LOG_REQUEST, message, request.getMethod(), request.getRequestURI());
 		String traceId = requestHandler.getCorrelationId();
 		return ApiError.builder()
 				.type(ErrorConstants.URI_SECURITY_AUTHORIZED)
@@ -133,7 +133,7 @@ public class ErrorHandlingAdvice {
 	ApiError onMissingServletRequestParameterException(
 			MissingServletRequestParameterException e, final HttpServletRequest request) {
 		String message = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-		logger.error(LOG_REQUEST, message, request.getMethod(), request.getRequestURI());
+		logger.warn(LOG_REQUEST, message, request.getMethod(), request.getRequestURI());
 		String traceId = requestHandler.getCorrelationId();
 
 		return ApiError.builder()
@@ -151,7 +151,7 @@ public class ErrorHandlingAdvice {
 	ApiError onMissingServletRequestPartException(MissingServletRequestPartException e,
 			final HttpServletRequest request) {
 		String message = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-		logger.error(LOG_REQUEST, message, request.getMethod(), request.getRequestURI());
+		logger.warn(LOG_REQUEST, message, request.getMethod(), request.getRequestURI());
 		String traceId = requestHandler.getCorrelationId();
 
 		return ApiError.builder()
@@ -169,7 +169,7 @@ public class ErrorHandlingAdvice {
 	ApiError onHttpRequestMethodNotSupportedException(HttpRequestMethodNotSupportedException e,
 			final HttpServletRequest request) {
 		String message = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-		logger.error(LOG_REQUEST, message, request.getMethod(), request.getRequestURI());
+		logger.warn(LOG_REQUEST, message, request.getMethod(), request.getRequestURI());
 		String traceId = requestHandler.getCorrelationId();
 
 		return ApiError.builder()
@@ -187,7 +187,7 @@ public class ErrorHandlingAdvice {
 	ApiError onConstraintValidationException(
 			ConstraintViolationException e, final HttpServletRequest request) {
 		String message = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-		logger.error(LOG_REQUEST, message, request.getMethod(), request.getRequestURI());
+		logger.warn(LOG_REQUEST, message, request.getMethod(), request.getRequestURI());
 		String traceId = requestHandler.getCorrelationId();
 
 		return ApiError.builder()
