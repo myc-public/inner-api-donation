@@ -114,10 +114,10 @@ FROM audit_outbox ORDER BY occurred_at DESC LIMIT 6;
 $sql | docker compose exec -T donation-api-mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysql -t -u "$MYSQL_USER" "$MYSQL_DATABASE"'
 ```
 
-Mode sandbox : meme requete, dans le pod MySQL du Sandbox :
+Mode sandbox : meme requete, dans le pod MySQL du Sandbox (`exec` : `oc --kubeconfig ...`, la fonction `ocs` avale le `--`) :
 
 ```powershell
-$sql | ocs exec -i deploy/donation-api-mysql -- sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysql -t -u "$MYSQL_USER" "$MYSQL_DATABASE"'
+$sql | oc --kubeconfig "$HOME\.kube\sandbox.config" exec -i deploy/donation-api-mysql -- sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysql -t -u "$MYSQL_USER" "$MYSQL_DATABASE"'
 ```
 
 Attendu pour `e2eDonationId` (console Postman) : `DonationUpdated` (`75.00` -> `90.00`) puis `DonationDeleted`,
@@ -161,7 +161,7 @@ ci-dessus) sans lancer la commande Docker, puis :
 
 ```powershell
 $lua = $lua.Replace('http://apisix-ext:9080', 'https://donation-gregorie769-dev.apps.rm3.7wse.p1.openshiftapps.com').Replace('openid-configuration")', 'openid-configuration", { ssl_verify = false })')
-$lua | ocs exec -i deploy/apisix-internal -- sh -c 'cd /usr/local/apisix && resty -c 512 -I deps/share/lua/5.1 /dev/stdin'
+$lua | oc --kubeconfig "$HOME\.kube\sandbox.config" exec -i deploy/apisix-internal -- sh -c 'cd /usr/local/apisix && resty -c 512 -I deps/share/lua/5.1 /dev/stdin'
 curl.exe -s -o NUL -w "poste %{http_code}`n" https://donation-gregorie769-dev.apps.rm3.7wse.p1.openshiftapps.com/realms/myc-internal/.well-known/openid-configuration
 ```
 
