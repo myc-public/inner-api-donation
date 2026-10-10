@@ -74,7 +74,7 @@ public class SecurityAuthEntryPoint implements AuthenticationEntryPoint {
 		} else {
 			message = authException.getMessage();
 		}
-		log.error("{} : {} {}", message, request.getMethod(), request.getRequestURI());
+		log.warn("{} : {} {}", message, request.getMethod(), request.getRequestURI());
 
 		response.setContentType(MediaType.APPLICATION_JSON_VALUE);
 		response.setCharacterEncoding("UTF-8");

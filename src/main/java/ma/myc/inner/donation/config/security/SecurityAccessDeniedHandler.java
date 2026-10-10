@@ -63,7 +63,7 @@ public class SecurityAccessDeniedHandler implements AccessDeniedHandler {
 			message = accessDeniedException.getMessage();
 		}
 		
-		log.error((request != null) ? "{} : {} {}" : "{}", 
+		log.warn((request != null) ? "{} : {} {}" : "{}", 
 				message, 
 				(request != null) ? request.getMethod() : "N/A", 
 				(request != null) ? request.getRequestURI() : "N/A");
