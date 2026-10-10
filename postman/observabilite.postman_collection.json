@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "donation-api - observabilite (phase 4)",
-    "description": "Scenarios S1 (nominal) et S2 (erreurs 4xx) du plan de test observabilite (jenkins-on-openshift-with-terraform/docs/dashboard-grafana-as-code-v1.md). Collection Runner : un dossier a la fois, avec le data file indique dans son nom.",
+    "name": "donation-api - observabilite",
+    "description": "Scenarios S1 (nominal) et S2 (erreurs 4xx) du plan de test observabilite (jenkins-on-openshift-with-terraform/docs/OBSERVABILITY-TEST.md). Passe par la Route publique (APISIX externe + WAF -> APISIX interne -> API) : un token est requis. Environnement e2e-sandbox (baseUrl, keycloakUrl, donationTestsClientSecret ; secret via Copy-KcSecret, inner-donation-api/postman/PLAN-DE-TEST-E2E.md). Collection Runner : un dossier a la fois, avec le data file indique dans son nom.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -277,10 +277,64 @@
       ]
     }
   ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{obsToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Token du compte de service donation-tests (dev uniquement, role donation-admin) : S1 cree des donateurs et des dons.",
+          "// Obtenu ici et non dans un dossier : le Runner lance un seul dossier a la fois. Renouvele 30 s avant expiration.",
+          "const expiresAt = Number(pm.collectionVariables.get(\"obsTokenExpiresAt\") || 0);",
+          "if (pm.collectionVariables.get(\"obsToken\") && Date.now() < expiresAt - 30000) { return; }",
+          "const secret = pm.environment.get(\"donationTestsClientSecret\");",
+          "if (!secret) { throw new Error(\"donationTestsClientSecret vide dans l'environnement : Copy-KcSecret DONATION_TESTS_CLIENT_SECRET (PLAN-DE-TEST-E2E.md)\"); }",
+          "const keycloakUrl = pm.environment.get(\"keycloakUrl\") || pm.collectionVariables.get(\"keycloakUrl\");",
+          "pm.sendRequest({",
+          "    url: keycloakUrl + \"/realms/myc-internal/protocol/openid-connect/token\",",
+          "    method: \"POST\",",
+          "    body: { mode: \"urlencoded\", urlencoded: [",
+          "        { key: \"grant_type\", value: \"client_credentials\" },",
+          "        { key: \"client_id\", value: \"donation-tests\" },",
+          "        { key: \"client_secret\", value: secret },",
+          "        { key: \"scope\", value: \"donation:read donation:write\" }",
+          "    ] }",
+          "}, (err, res) => {",
+          "    if (err || res.code !== 200) { throw new Error(\"Token donation-tests refuse : \" + (err ? err.message : res.code)); }",
+          "    const body = res.json();",
+          "    pm.collectionVariables.set(\"obsToken\", body.access_token);",
+          "    pm.collectionVariables.set(\"obsTokenExpiresAt\", String(Date.now() + body.expires_in * 1000));",
+          "});"
+        ]
+      }
+    }
+  ],
   "variable": [
     {
       "key": "baseUrl",
-      "value": "https://donation-api-gregorie769-dev.apps.rm3.7wse.p1.openshiftapps.com"
+      "value": "https://donation-gregorie769-dev.apps.rm3.7wse.p1.openshiftapps.com"
+    },
+    {
+      "key": "keycloakUrl",
+      "value": "https://donation-gregorie769-dev.apps.rm3.7wse.p1.openshiftapps.com"
+    },
+    {
+      "key": "obsToken",
+      "value": ""
+    },
+    {
+      "key": "obsTokenExpiresAt",
+      "value": ""
     },
     {
       "key": "donorId",
